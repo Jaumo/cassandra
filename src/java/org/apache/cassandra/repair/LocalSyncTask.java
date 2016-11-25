@@ -77,7 +77,7 @@ public class LocalSyncTask extends SyncTask implements StreamEventHandler
         }
         Tracing.traceRepair(message);
         StreamPlan plan = new StreamPlan("Repair", repairedAt, 1, false, isIncremental, false).listeners(this)
-                                            .flushBeforeTransfer(true)
+                                            .flushBeforeTransfer(false)
                                             // request ranges from the remote node
                                             .requestRanges(dst, preferred, desc.keyspace, differences, desc.columnFamily);
         if (!pullRepair)

@@ -901,6 +901,33 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                    offHeapRatio * 100));
     }
 
+    /**
+     * Flush if there is unflushed data in the memtables for a list of token ranges
+     *
+     * @return a Future yielding the commit log position that can be guaranteed to have been successfully written
+     *         to sstables for this table once the future completes
+     */
+    public ListenableFuture<CommitLogPosition> forceFlush(Collection<Range<Token>> tokenRanges)
+    {
+        synchronized (data)
+        {
+            Memtable current = data.getView().getCurrentMemtable();
+            for (ColumnFamilyStore cfs : concatWithIndexes())
+                if (!cfs.data.getView().getCurrentMemtable().isCleanForRanges(tokenRanges)) {
+                    ArrayList<String> rangeDescs = new ArrayList<>();
+                    for (Range<Token> range: tokenRanges) {
+                        rangeDescs.add(range.toString());
+                    }
+                    logger.debug("Forcing flush on keyspace {}, CF {} - found dirty partitions for ranges {}",
+                                 cfs.keyspace.getName(),
+                                 cfs.name,
+                                 String.join(", ", rangeDescs)
+                                 );
+                    return switchMemtableIfCurrent(current);
+                }
+            return waitForFlushes();
+        }
+    }
 
     /**
      * Flush if there is unflushed data in the memtables
@@ -952,6 +979,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         });
         postFlushExecutor.execute(task);
         return task;
+    }
+
+    public CommitLogPosition forceBlockingFlushForTokenRanges(Collection<Range<Token>> tokenRanges)
+    {
+        return FBUtilities.waitOnFuture(forceFlush(tokenRanges));
     }
 
     public CommitLogPosition forceBlockingFlush()

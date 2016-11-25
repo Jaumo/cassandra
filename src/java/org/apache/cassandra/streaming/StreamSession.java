@@ -308,11 +308,12 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     public synchronized void addTransferRanges(String keyspace, Collection<Range<Token>> ranges, Collection<String> columnFamilies, boolean flushTables, long repairedAt)
     {
         failIfFinished();
+        List<Range<Token>> normalizedRanges = Range.normalize(ranges);
+
         Collection<ColumnFamilyStore> stores = getColumnFamilyStores(keyspace, columnFamilies);
         if (flushTables)
-            flushSSTables(stores);
+            flushSSTables(stores, normalizedRanges);
 
-        List<Range<Token>> normalizedRanges = Range.normalize(ranges);
         List<SSTableStreamingSections> sections = getSSTableSectionsForRanges(normalizedRanges, stores, repairedAt, isIncremental);
         try
         {
@@ -781,11 +782,11 @@ public class StreamSession implements IEndpointStateChangeSubscriber
      * Flushes matching column families from the given keyspace, or all columnFamilies
      * if the cf list is empty.
      */
-    private void flushSSTables(Iterable<ColumnFamilyStore> stores)
+    private void flushSSTables(Iterable<ColumnFamilyStore> stores, List<Range<Token>> tokenRanges)
     {
         List<Future<?>> flushes = new ArrayList<>();
         for (ColumnFamilyStore cfs : stores)
-            flushes.add(cfs.forceFlush());
+            flushes.add(cfs.forceFlush(tokenRanges));
         FBUtilities.waitOnFutures(flushes);
     }
 

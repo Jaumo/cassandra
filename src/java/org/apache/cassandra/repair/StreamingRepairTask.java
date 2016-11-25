@@ -63,7 +63,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
             isIncremental = prs.isIncremental;
         }
         new StreamPlan("Repair", repairedAt, 1, false, isIncremental, false).listeners(this)
-                                            .flushBeforeTransfer(true)
+                                            .flushBeforeTransfer(false)
                                             // request ranges from the remote node
                                             .requestRanges(dest, preferred, desc.keyspace, request.ranges, desc.columnFamily)
                                             // send ranges to the remote node

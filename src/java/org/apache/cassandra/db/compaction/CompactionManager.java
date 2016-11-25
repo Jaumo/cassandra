@@ -1331,7 +1331,8 @@ public class CompactionManager implements CompactionManagerMBean
             else
             {
                 // flush first so everyone is validating data that is as similar as possible
-                StorageService.instance.forceKeyspaceFlush(cfs.keyspace.getName(), cfs.name);
+                logger.debug("Check if blocking flush is required for keyspace {}, CF {}", cfs.keyspace.getName(), cfs.name);
+                cfs.forceBlockingFlushForTokenRanges(validator.desc.ranges);
                 sstables = getSSTablesToValidate(cfs, validator);
                 if (sstables == null)
                     return; // this means the parent repair session was removed - the repair session failed on another node and we removed it

@@ -67,6 +67,7 @@ public class Memtable implements Comparable<Memtable>
     private static final Logger logger = LoggerFactory.getLogger(Memtable.class);
 
     public static final MemtablePool MEMORY_POOL = createMemtableAllocatorPool();
+    public static final int MAX_PARITIONS_FOR_CLEANCHECK = 1000;
 
     private static MemtablePool createMemtableAllocatorPool()
     {
@@ -237,6 +238,26 @@ public class Memtable implements Comparable<Memtable>
     public boolean isClean()
     {
         return partitions.isEmpty();
+    }
+
+    public boolean isCleanForRanges(Collection<Range<Token>> tokenRanges)
+    {
+        if (partitions.isEmpty())
+            return true;
+
+        if (partitionCount() > MAX_PARITIONS_FOR_CLEANCHECK)
+            return false;
+
+        for(PartitionPosition key: partitions.keySet()) {
+            assert key instanceof DecoratedKey;
+            for (Range<Token> tokenRange: tokenRanges) {
+                if (tokenRange.contains((key.getToken())))
+                    return false;
+
+            }
+        }
+
+        return true;
     }
 
     public boolean mayContainDataBefore(CommitLogPosition position)
