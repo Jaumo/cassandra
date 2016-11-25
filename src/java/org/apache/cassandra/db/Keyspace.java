@@ -423,37 +423,9 @@ public class Keyspace
         }
     }
 
-    public CompletableFuture<?> apply(Mutation mutation, boolean writeCommitLog)
-    {
-        return apply(mutation, writeCommitLog, true, false, null);
-    }
-
-    /**
-     * Should be used if caller is blocking and runs in mutation stage.
-     * Otherwise there is a race condition where ALL mutation workers are beeing blocked ending
-     * in a complete deadlock of the mutation stage. See CASSANDRA-12689.
-     *
-     * @param mutation
-     * @param writeCommitLog
-     * @return
-     */
-    public CompletableFuture<?> applyNotDeferrable(Mutation mutation, boolean writeCommitLog)
-    {
-        return apply(mutation, writeCommitLog, true, false, false, null);
-    }
-
     public CompletableFuture<?> apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
     {
-        return apply(mutation, writeCommitLog, updateIndexes, false, null);
-    }
-
-    public CompletableFuture<?> apply(final Mutation mutation,
-                                      final boolean writeCommitLog,
-                                      boolean updateIndexes,
-                                      boolean dontTimeOut,
-                                      CompletableFuture<?> future)
-    {
-        return apply(mutation, writeCommitLog, updateIndexes, dontTimeOut, true, future);
+        return apply(mutation, writeCommitLog, updateIndexes, false, true, null);
     }
 
     public void applyBlocking(final Mutation mutation,
@@ -479,7 +451,7 @@ public class Keyspace
                                       boolean updateIndexes,
                                       boolean dontTimeOut) throws ExecutionException
     {
-        Uninterruptibles.getUninterruptibly(apply(mutation, writeCommitLog, updateIndexes, dontTimeOut, false, null));
+        apply(mutation, writeCommitLog, updateIndexes, dontTimeOut, false, null);
     }
 
     /**
@@ -505,7 +477,11 @@ public class Keyspace
         Lock[] locks = null;
 
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
-        final CompletableFuture<?> mark = future == null ? new CompletableFuture<>() : future;
+
+        // If apply is not deferrable, no future is required, returns always null
+        if (isDeferrable && future == null) {
+            future = new CompletableFuture<>();
+        }
 
         if (requiresViewUpdate)
         {
@@ -542,7 +518,7 @@ public class Keyspace
                             if (future != null)
                             {
                                 future.completeExceptionally(new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1));
-                                return mark;
+                                return future;
                             }
                             else
                                 throw new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
@@ -554,11 +530,12 @@ public class Keyspace
 
                             // This view update can't happen right now. so rather than keep this thread busy
                             // we will re-apply ourself to the queue and try again later
+                            final CompletableFuture<?> mark = future;
                             StageManager.getStage(Stage.MUTATION).execute(() ->
-                                                                          apply(mutation, writeCommitLog, true, dontTimeOut, mark)
+                                                                          apply(mutation, writeCommitLog, true, dontTimeOut, true, mark)
                             );
 
-                            return mark;
+                            return future;
                         }
                         else
                         {
@@ -638,8 +615,11 @@ public class Keyspace
                 if (requiresViewUpdate)
                     baseComplete.set(System.currentTimeMillis());
             }
-            mark.complete(null);
-            return mark;
+
+            if (future != null) {
+                future.complete(null);
+            }
+            return future;
         }
         finally
         {
