@@ -149,7 +149,7 @@ public class PaxosState
                 Mutation mutation = proposal.makeMutation();
                 try
                 {
-                    Uninterruptibles.getUninterruptibly(Keyspace.open(mutation.getKeyspaceName()).applyNotDeferrable(mutation, true));
+                    Keyspace.open(mutation.getKeyspaceName()).applyBlocking(mutation, true);
                 }
                 catch (ExecutionException e)
                 {

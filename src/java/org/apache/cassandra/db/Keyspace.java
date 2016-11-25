@@ -26,6 +26,8 @@ import java.util.concurrent.locks.Lock;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
+import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.commons.lang3.concurrent.ConcurrentException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -445,18 +447,39 @@ public class Keyspace
         return apply(mutation, writeCommitLog, updateIndexes, false, null);
     }
 
-    public CompletableFuture<?> applyFromCommitLog(Mutation mutation)
-    {
-        return apply(mutation, false, true, true, null);
-    }
-
     public CompletableFuture<?> apply(final Mutation mutation,
                                       final boolean writeCommitLog,
                                       boolean updateIndexes,
-                                      boolean isClReplay,
+                                      boolean dontTimeOut,
                                       CompletableFuture<?> future)
     {
-        return apply(mutation, writeCommitLog, updateIndexes, isClReplay, true, future);
+        return apply(mutation, writeCommitLog, updateIndexes, dontTimeOut, true, future);
+    }
+
+    public void applyBlocking(final Mutation mutation,
+                              final boolean writeCommitLog) throws ExecutionException
+    {
+        applyBlocking(mutation, writeCommitLog, true, false);
+    }
+
+    /**
+     * If apply is blocking, apply must not be deferred
+     * Otherwise there is a race condition where ALL mutation workers are beeing blocked ending
+     * in a complete deadlock of the mutation stage. See CASSANDRA-12689.
+     *
+     * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
+     *                       may happen concurrently, depending on the CL Executor type.
+     * @param writeCommitLog false to disable commitlog append entirely
+     * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
+     * @param dontTimeOut    true if view lock acquisition should never time out
+     * @throws ExecutionException
+     */
+    public void applyBlocking(final Mutation mutation,
+                                      final boolean writeCommitLog,
+                                      boolean updateIndexes,
+                                      boolean dontTimeOut) throws ExecutionException
+    {
+        Uninterruptibles.getUninterruptibly(apply(mutation, writeCommitLog, updateIndexes, dontTimeOut, false, null));
     }
 
     /**
@@ -466,13 +489,13 @@ public class Keyspace
      *                       may happen concurrently, depending on the CL Executor type.
      * @param writeCommitLog false to disable commitlog append entirely
      * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
-     * @param isClReplay     true if caller is the commitlog replayer
+     * @param dontTimeOut    true if view lock acquisition should never time out
      * @param isDeferrable   true if caller is not waiting for future to complete, so that future may be deferred
      */
     public CompletableFuture<?> apply(final Mutation mutation,
                                       final boolean writeCommitLog,
                                       boolean updateIndexes,
-                                      boolean isClReplay,
+                                      boolean dontTimeOut,
                                       boolean isDeferrable,
                                       CompletableFuture<?> future)
     {
@@ -509,7 +532,7 @@ public class Keyspace
                     if (lock == null)
                     {
                         // avoid throwing a WTE during commitlog replay
-                        if (!isClReplay && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
+                        if (!dontTimeOut && (System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
                         {
                             for (int j = 0; j < i; j++)
                                 locks[j].unlock();
@@ -532,7 +555,7 @@ public class Keyspace
                             // This view update can't happen right now. so rather than keep this thread busy
                             // we will re-apply ourself to the queue and try again later
                             StageManager.getStage(Stage.MUTATION).execute(() ->
-                                                                          apply(mutation, writeCommitLog, true, isClReplay, mark)
+                                                                          apply(mutation, writeCommitLog, true, dontTimeOut, mark)
                             );
 
                             return mark;
@@ -564,7 +587,7 @@ public class Keyspace
             }
 
             long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart.get();
-            if (!isClReplay)
+            if (!dontTimeOut)
             {
                 for(UUID cfid : columnFamilyIds)
                     columnFamilyStores.get(cfid).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
@@ -596,7 +619,7 @@ public class Keyspace
                     try
                     {
                         Tracing.trace("Creating materialized view mutations from base table replica");
-                        viewManager.forTable(upd.metadata()).pushViewReplicaUpdates(upd, writeCommitLog && !isClReplay, baseComplete);
+                        viewManager.forTable(upd.metadata()).pushViewReplicaUpdates(upd, writeCommitLog, baseComplete);
                     }
                     catch (Throwable t)
                     {

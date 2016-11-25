@@ -220,7 +220,7 @@ public class Mutation implements IMutation
         try
         {
             Keyspace ks = Keyspace.open(keyspaceName);
-            Uninterruptibles.getUninterruptibly(ks.applyNotDeferrable(this, durableWrites));
+            ks.applyBlocking(this, durableWrites);
         }
         catch (ExecutionException e)
         {
