@@ -25,8 +25,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import com.google.common.collect.Iterables;
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,6 +44,8 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -152,8 +152,7 @@ public class StreamReceiveTask extends StreamTask
 
         public void run()
         {
-            boolean hasViews = false;
-            boolean hasCDC = false;
+            boolean useRegularWritePath = false;
             ColumnFamilyStore cfs = null;
             try
             {
@@ -166,24 +165,21 @@ public class StreamReceiveTask extends StreamTask
                     task.session.taskCompleted(task);
                     return;
                 }
+
+                /*
+                 * We have a special path for CDC.
+                 *
+                 * For CDC-enabled tables, we want to ensure that the mutations are run through the CommitLog so they
+                 * can be archived by the CDC process on discard.
+                 */
                 cfs = Keyspace.open(kscf.left).getColumnFamilyStore(kscf.right);
-                hasViews = !Iterables.isEmpty(View.findAll(kscf.left, kscf.right));
-                hasCDC = cfs.metadata.params.cdc;
+                useRegularWritePath = cfs.metadata.params.cdc;
 
                 Collection<SSTableReader> readers = task.sstables;
 
                 try (Refs<SSTableReader> refs = Refs.ref(readers))
                 {
-                    /*
-                     * We have a special path for views and for CDC.
-                     *
-                     * For views, since the view requires cleaning up any pre-existing state, we must put all partitions
-                     * through the same write path as normal mutations. This also ensures any 2is are also updated.
-                     *
-                     * For CDC-enabled tables, we want to ensure that the mutations are run through the CommitLog so they
-                     * can be archived by the CDC process on discard.
-                     */
-                    if (hasViews || hasCDC)
+                    if (useRegularWritePath)
                     {
                         for (SSTableReader reader : readers)
                         {
@@ -201,7 +197,7 @@ public class StreamReceiveTask extends StreamTask
                                         //
                                         // If the CFS has CDC, however, these updates need to be written to the CommitLog
                                         // so they get archived into the cdc_raw folder
-                                        ks.applyBlocking(m, hasCDC, true, true);
+                                        ks.applyBlocking(m, true, true, true);
                                     }
                                 }
                             }
@@ -253,7 +249,7 @@ public class StreamReceiveTask extends StreamTask
             {
                 // We don't keep the streamed sstables since we've applied them manually so we abort the txn and delete
                 // the streamed sstables.
-                if (hasViews || hasCDC)
+                if (useRegularWritePath)
                 {
                     if (cfs != null)
                         cfs.forceBlockingFlush();
