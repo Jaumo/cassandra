@@ -63,6 +63,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.SchemaConstants;
+import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
@@ -1061,6 +1062,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         SystemKeyspace.setBootstrapState(SystemKeyspace.BootstrapState.COMPLETED);
         executePreJoinTasks(didBootstrap);
         setTokens(bootstrapTokens);
+        for (String keyspace : Schema.instance.getUserKeyspaces())
+        {
+            for (ViewDefinition view: Schema.instance.getKSMetaData(keyspace).views)
+                SystemKeyspace.finishViewBuildStatus(view.ksName, view.viewName);
+        }
 
         assert tokenMetadata.sortedTokens().size() > 0;
         doAuthSetup();
