@@ -68,7 +68,7 @@ public final class Hint
         return new Hint(mutation, creationTime, mutation.smallestGCGS());
     }
 
-    /**
+    /*
      * @param mutation the hinted mutation
      * @param creationTime time of this hint's creation (in milliseconds since epoch)
      * @param gcgs the smallest gcgs of all tables involved at the time of hint creation (in seconds)
@@ -93,7 +93,7 @@ public final class Hint
                 filtered = filtered.without(id);
 
         if (!filtered.isEmpty())
-            filtered.apply();
+            filtered.applyDontTimeOut();
     }
 
     /**

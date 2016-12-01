@@ -215,17 +215,22 @@ public class Mutation implements IMutation
         return ks.apply(this, Keyspace.open(keyspaceName).getMetadata().params.durableWrites, true);
     }
 
-    public void apply(boolean durableWrites)
+    public void apply(boolean durableWrites, boolean dontTimeOut)
     {
         try
         {
             Keyspace ks = Keyspace.open(keyspaceName);
-            ks.applyBlocking(this, durableWrites);
+            ks.applyBlocking(this, durableWrites, true, dontTimeOut);
         }
         catch (ExecutionException e)
         {
             throw Throwables.propagate(e.getCause());
         }
+    }
+
+    public void apply(boolean durableWrites)
+    {
+        apply(durableWrites, false);
     }
 
     /*
@@ -235,6 +240,11 @@ public class Mutation implements IMutation
     public void apply()
     {
         apply(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
+    }
+
+    public void applyDontTimeOut()
+    {
+        apply(Keyspace.open(keyspaceName).getMetadata().params.durableWrites, true);
     }
 
     public void applyUnsafe()
