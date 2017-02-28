@@ -17,37 +17,36 @@
  */
 package org.apache.cassandra.streaming;
 
-import java.io.Serializable;
-import java.util.Set;
-import java.util.UUID;
-
-import com.google.common.base.Predicate;
-import com.google.common.collect.Iterables;
-
-/**
- * Current snapshot of streaming progress.
- */
-public class StreamState implements Serializable
+public enum StreamOperation
 {
-    public final UUID planId;
-    public final StreamOperation streamOperation;
-    public final Set<SessionInfo> sessions;
 
-    public StreamState(UUID planId, StreamOperation streamOperation, Set<SessionInfo> sessions)
-    {
-        this.planId = planId;
-        this.sessions = sessions;
-        this.streamOperation = streamOperation;
+    OTHER("Other"), // Fallback to avoid null types when deserializing from string
+    RESTORE_REPLICA_COUNT("Restore replica count"), // Handles removeNode
+    DECOMMISSION("Unbootstrap"),
+    RELOCATION("Relocation"),
+    BOOTSTRAP("Bootstrap"),
+    REBUILD("Rebuild"),
+    BULK_LOAD("Bulk Load"),
+    REPAIR("Repair")
+    ;
+
+    private final String type;
+
+    StreamOperation(final String type) {
+        this.type = type;
     }
 
-    public boolean hasFailedSession()
-    {
-        return Iterables.any(sessions, new Predicate<SessionInfo>()
-        {
-            public boolean apply(SessionInfo session)
-            {
-                return session.isFailed();
+    public static StreamOperation fromString(String text) {
+        for (StreamOperation b : StreamOperation.values()) {
+            if (b.type.equalsIgnoreCase(text)) {
+                return b;
             }
-        });
+        }
+
+        return OTHER;
+    }
+
+    public String getDescription() {
+        return type;
     }
 }
