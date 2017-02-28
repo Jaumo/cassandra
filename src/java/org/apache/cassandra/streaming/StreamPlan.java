@@ -34,7 +34,7 @@ public class StreamPlan
 {
     public static final String[] EMPTY_COLUMN_FAMILIES = new String[0];
     private final UUID planId = UUIDGen.getTimeUUID();
-    private final String description;
+    private final StreamType type;
     private final List<StreamEventHandler> handlers = new ArrayList<>();
     private final long repairedAt;
     private final StreamCoordinator coordinator;
@@ -44,22 +44,22 @@ public class StreamPlan
     /**
      * Start building stream plan.
      *
-     * @param description Stream type that describes this StreamPlan
+     * @param type Stream type that describes this StreamPlan
      */
-    public StreamPlan(String description)
+    public StreamPlan(StreamType type)
     {
-        this(description, ActiveRepairService.UNREPAIRED_SSTABLE, 1, false, false, false, null);
+        this(type, ActiveRepairService.UNREPAIRED_SSTABLE, 1, false, false, false, null);
     }
 
-    public StreamPlan(String description, boolean keepSSTableLevels, boolean connectSequentially)
+    public StreamPlan(StreamType type, boolean keepSSTableLevels, boolean connectSequentially)
     {
-        this(description, ActiveRepairService.UNREPAIRED_SSTABLE, 1, keepSSTableLevels, false, connectSequentially, null);
+        this(type, ActiveRepairService.UNREPAIRED_SSTABLE, 1, keepSSTableLevels, false, connectSequentially, null);
     }
 
-    public StreamPlan(String description, long repairedAt, int connectionsPerHost, boolean keepSSTableLevels,
+    public StreamPlan(StreamType type, long repairedAt, int connectionsPerHost, boolean keepSSTableLevels,
                       boolean isIncremental, boolean connectSequentially, UUID pendingRepair)
     {
-        this.description = description;
+        this.type = type;
         this.repairedAt = repairedAt;
         this.coordinator = new StreamCoordinator(connectionsPerHost, keepSSTableLevels, isIncremental, new DefaultConnectionFactory(),
                                                  connectSequentially, pendingRepair);
@@ -187,7 +187,7 @@ public class StreamPlan
      */
     public StreamResultFuture execute()
     {
-        return StreamResultFuture.init(planId, description, handlers, coordinator);
+        return StreamResultFuture.init(planId, type, handlers, coordinator);
     }
 
     /**

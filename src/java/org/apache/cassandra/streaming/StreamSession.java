@@ -210,9 +210,9 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         return index;
     }
 
-    public String description()
+    public StreamType type()
     {
-        return streamResult == null ? null : streamResult.description;
+        return streamResult == null ? null : streamResult.type;
     }
 
     public boolean keepSSTableLevel()

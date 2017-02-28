@@ -195,7 +195,7 @@ public class ConnectionHandler
                     FBUtilities.getBroadcastAddress(),
                     session.sessionIndex(),
                     session.planId(),
-                    session.description(),
+                    session.type(),
                     !isOutgoingHandler,
                     session.keepSSTableLevel(),
                     session.isIncremental(),
