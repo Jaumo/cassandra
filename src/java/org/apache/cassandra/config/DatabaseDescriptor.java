@@ -2212,6 +2212,11 @@ public class DatabaseDescriptor
         return conf.cdc_enabled;
     }
 
+    public static boolean isMVFastStreamEnabled()
+    {
+        return conf.mv_fast_stream;
+    }
+
     public static String getCDCLogLocation()
     {
         return conf.cdc_raw_directory;

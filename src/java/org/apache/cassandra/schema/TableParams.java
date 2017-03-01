@@ -24,6 +24,10 @@ import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.cql3.statements.TableAttributes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.BloomCalculations;
 
@@ -50,7 +54,8 @@ public final class TableParams
         READ_REPAIR_CHANCE,
         SPECULATIVE_RETRY,
         CRC_CHECK_CHANCE,
-        CDC;
+        CDC,
+        MV_FAST_STREAM;
 
         @Override
         public String toString()
@@ -85,6 +90,7 @@ public final class TableParams
     public final CompressionParams compression;
     public final ImmutableMap<String, ByteBuffer> extensions;
     public final boolean cdc;
+    public final boolean mvFastStream;
 
     private TableParams(Builder builder)
     {
@@ -106,6 +112,7 @@ public final class TableParams
         compression = builder.compression;
         extensions = builder.extensions;
         cdc = builder.cdc;
+        mvFastStream = builder.mvFastStream;
     }
 
     public static Builder builder()
@@ -130,7 +137,8 @@ public final class TableParams
                             .readRepairChance(params.readRepairChance)
                             .speculativeRetry(params.speculativeRetry)
                             .extensions(params.extensions)
-                            .cdc(params.cdc);
+                            .cdc(params.cdc)
+                            .mvFastStream(params.mvFastStream);
     }
 
     public Builder unbuild()
@@ -226,7 +234,8 @@ public final class TableParams
             && compaction.equals(p.compaction)
             && compression.equals(p.compression)
             && extensions.equals(p.extensions)
-            && cdc == p.cdc;
+            && cdc == p.cdc
+            && mvFastStream == p.mvFastStream;
     }
 
     @Override
@@ -247,7 +256,8 @@ public final class TableParams
                                 compaction,
                                 compression,
                                 extensions,
-                                cdc);
+                                cdc,
+                                mvFastStream);
     }
 
     @Override
@@ -270,6 +280,7 @@ public final class TableParams
                           .add(Option.COMPRESSION.toString(), compression)
                           .add(Option.EXTENSIONS.toString(), extensions)
                           .add(Option.CDC.toString(), cdc)
+                          .add(Option.MV_FAST_STREAM.toString(), mvFastStream)
                           .toString();
     }
 
@@ -291,6 +302,7 @@ public final class TableParams
         private CompressionParams compression = CompressionParams.DEFAULT;
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
+        private boolean mvFastStream;
 
         public Builder()
         {
@@ -388,6 +400,12 @@ public final class TableParams
         public Builder cdc(boolean val)
         {
             cdc = val;
+            return this;
+        }
+
+        public Builder mvFastStream(boolean val)
+        {
+            mvFastStream = val;
             return this;
         }
 

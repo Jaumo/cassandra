@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.schema;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -43,6 +44,10 @@ public final class ViewMetadata
     public final SelectStatement.RawStatement select;
     public final String whereClause;
 
+    // Tells if view has same primary key fields as base table
+    // If this is true, view does not need read before write on updte
+    private Boolean congruentPrimaryKey;
+
     /**
      * @param name              Name of the view
      * @param baseTableId       Internal ID of the table which this view is based off of
@@ -65,6 +70,51 @@ public final class ViewMetadata
         this.select = select;
         this.whereClause = whereClause;
         this.metadata = metadata;
+    }
+
+    private boolean hasCongruentPrimaryKey()
+    {
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace);
+        TableMetadata baseTable = ksm.tables.getNullable(baseTableName);
+        if (baseTable == null)
+        {
+            throw new RuntimeException(String.format("Can't fetch metadata of base table %s.%s for view %s.%s",
+                                                     keyspace, baseTableName,
+                                                     keyspace, name));
+        }
+
+        ArrayList<String> pkColumns = new ArrayList<>();
+
+        // First collect all PK columns of base table, then compare with view
+        for (ColumnMetadata col: baseTable.partitionKeyColumns()) {
+            pkColumns.add(col.name.toString());
+        }
+
+        for (ColumnMetadata col: baseTable.clusteringColumns()) {
+            pkColumns.add(col.name.toString());
+        }
+
+        for (ColumnMetadata col: metadata.partitionKeyColumns()) {
+            if (!pkColumns.remove(col.name.toString())) {
+                return false;
+            }
+        }
+        for (ColumnMetadata col: metadata.clusteringColumns()) {
+            if (!pkColumns.remove(col.name.toString())) {
+                return false;
+            }
+        }
+
+        return pkColumns.size() == 0;
+    }
+
+    public boolean primaryKeyIsCongruentToBaseTable()
+    {
+        if (congruentPrimaryKey == null)
+        {
+            congruentPrimaryKey = hasCongruentPrimaryKey();
+        }
+        return !congruentPrimaryKey;
     }
 
     /**
@@ -133,8 +183,9 @@ public final class ViewMetadata
     /**
      * Replace the column 'from' with 'to' in this materialized view definition's partition,
      * clustering, or included columns.
+     *
      * @param from the existing column
-     * @param to the new column
+     * @param to   the new column
      */
     public ViewMetadata renamePrimaryKeyColumn(ColumnIdentifier from, ColumnIdentifier to)
     {
@@ -143,9 +194,9 @@ public final class ViewMetadata
         ColumnMetadata.Raw fromRaw = ColumnMetadata.Raw.forQuoted(from.toString());
         ColumnMetadata.Raw toRaw = ColumnMetadata.Raw.forQuoted(to.toString());
         List<Relation> newRelations =
-            relations.stream()
-                     .map(r -> r.renameIdentifier(fromRaw, toRaw))
-                     .collect(Collectors.toList());
+        relations.stream()
+                 .map(r -> r.renameIdentifier(fromRaw, toRaw))
+                 .collect(Collectors.toList());
 
         String rawSelect = View.buildSelectStatement(baseTableName, metadata.columns(), whereClause);
 

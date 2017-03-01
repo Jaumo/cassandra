@@ -201,6 +201,10 @@ public class Config
     public int cdc_total_space_in_mb = 0;
     public int cdc_free_space_check_interval_ms = 250;
 
+    // Don't send streams for MVs through write path
+    // This enables it globally. There is also a table option 'mv_fast_stream' to enable this per CF
+    public boolean mv_fast_stream = false;
+
     @Deprecated
     public int commitlog_periodic_queue_size = -1;
 

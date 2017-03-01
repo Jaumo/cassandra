@@ -129,7 +129,7 @@ JVM_OPTS="$JVM_OPTS -Xloggc:${CASSANDRA_HOME}/logs/gc.log"
 
 # Read user-defined JVM options from jvm.options file
 JVM_OPTS_FILE=$CASSANDRA_CONF/jvm.options
-for opt in `grep "^-" $JVM_OPTS_FILE`
+for opt in `grep --color=never "^-" $JVM_OPTS_FILE`
 do
   JVM_OPTS="$JVM_OPTS $opt"
 done

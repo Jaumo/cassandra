@@ -22,8 +22,12 @@ import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.index.sasi.analyzer.filter.FilterPipelineExecutor;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.TableParams.Option;
 
@@ -132,6 +136,10 @@ public final class TableAttributes extends PropertyDefinitions
 
         if (hasOption(Option.CDC))
             builder.cdc(getBoolean(Option.CDC.toString(), false));
+
+        if (hasOption(Option.MV_FAST_STREAM)) {
+            builder.mvFastStream(getBoolean(Option.MV_FAST_STREAM.toString(), false));
+        }
 
         return builder.build();
     }

@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
@@ -158,6 +159,14 @@ public class StreamReceiveTask extends StreamTask
          * can be archived by the CDC process on discard.
          */
         private boolean requiresWritePath(ColumnFamilyStore cfs) {
+            // Don't go through write path if mv_fast_stream is either enabled globally or on CF
+            if (cfs.metadata().params.mvFastStream ||
+                DatabaseDescriptor.isMVFastStreamEnabled() ||
+                !cfs.viewManager.primaryKeysOfViewsAreCongruent())
+            {
+                return false;
+            }
+
             // Write path is not required for consistent range movements
             switch (task.session.type()) {
                 case BOOTSTRAP:

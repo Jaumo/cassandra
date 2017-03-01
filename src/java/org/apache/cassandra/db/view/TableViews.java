@@ -47,6 +47,7 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 public class TableViews extends AbstractCollection<View>
 {
     private final TableMetadataRef baseTableMetadata;
+    private Boolean congruentPrimaryKeys;
 
     // We need this to be thread-safe, but the number of times this is changed (when a view is created in the keyspace)
     // is massively exceeded by the number of times it's read (for every mutation on the keyspace), so a copy-on-write
@@ -77,6 +78,7 @@ public class TableViews extends AbstractCollection<View>
     {
         // We should have validated that there is no existing view with this name at this point
         assert !contains(view.name);
+        congruentPrimaryKeys = false;
         return views.add(view);
     }
 
@@ -109,7 +111,31 @@ public class TableViews extends AbstractCollection<View>
 
     public void removeByName(String viewName)
     {
-        views.removeIf(v -> v.name.equals(viewName));
+        if (views.removeIf(v -> v.name.equals(viewName)))
+            congruentPrimaryKeys = null;
+    }
+
+    /**
+     * Primary keys of all views are congruent with base tables
+     *
+     * @return
+     */
+    public boolean primaryKeysOfViewsAreCongruent()
+    {
+        if (congruentPrimaryKeys == null)
+        {
+            congruentPrimaryKeys = false;
+            for (View view : views)
+            {
+                if (view.getDefinition().primaryKeyIsCongruentToBaseTable())
+                {
+                    congruentPrimaryKeys = true;
+                    break;
+                }
+            }
+        }
+
+        return congruentPrimaryKeys;
     }
 
     /**

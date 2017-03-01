@@ -1120,3 +1120,23 @@ back_pressure_strategy:
 
 # Do not try to coalesce messages if we already got that many messages. This should be more than 2 and less than 128.
 # otc_coalescing_enough_coalesced_messages: 8
+
+# If enabled, streams for tables with at least a single materialized view are not send through the regular write path
+# Instead streams are directly written into SSTables. Sending streams through write path is MUCH slower than just
+# writing SSTables as each mutation in the stream causes a read on the base table. See write path documentation for
+# more details. In MOST cases, write path is required to guarantee consistency.
+# However, a read before write is not necessary if one of the following is true:
+# (a) The materialized view does not add fields to the primary key of the base table
+#     and does not perform filtering like (CREATE MATERIALIZED VIEW ... WHERE field_a = 1).
+#     Example: base_table has primary key (a, b) and view has primary key (b, a)
+# (b) Your model is append only. No deletes, no updates, only inserts.
+#
+# There is also a table option to enable mv_fast_stream per table:
+# ALTER TABLE x WITH mv_fast_stream = true
+# Setting this option enables mv_fast_stream globally and ignores per table settings
+#
+# If none of the above is true and you enable mv_fast_stream, this may create stale data in the MV,
+# which can only be recovered by recreating the MV. A repair won't detect these kinds of inconsistencies as the
+# inconsistency does not exist among nodes but between a base table and it's MV.
+# See CASSANDRA-12888 and CASSANDRA-13066 for details
+mv_fast_stream: false
