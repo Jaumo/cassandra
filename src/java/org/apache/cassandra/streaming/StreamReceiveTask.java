@@ -174,9 +174,8 @@ public class StreamReceiveTask extends StreamTask
                     return false;
             }
 
-            boolean hasViews = !Iterables.isEmpty(View.findAll(cfs.metadata.keyspace, cfs.getTableName()));
-
-            return hasViews || hasCDC(cfs);
+            // write path required if table has views
+            return !Iterables.isEmpty(View.findAll(cfs.metadata.keyspace, cfs.getTableName()));
         }
 
         private boolean hasCDC(ColumnFamilyStore cfs)
