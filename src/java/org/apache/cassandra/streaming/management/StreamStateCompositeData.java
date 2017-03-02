@@ -131,6 +131,6 @@ public class StreamStateCompositeData
                                                                                 return SessionInfoCompositeData.fromCompositeData(input);
                                                                             }
                                                                         }));
-        return new StreamState(planId, StreamType.valueOf(typeString), sessions);
+        return new StreamState(planId, StreamType.fromString(typeString), sessions);
     }
 }

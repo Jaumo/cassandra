@@ -20,6 +20,16 @@ public enum StreamType
         this.type = type;
     }
 
+    public static StreamType fromString(String text) {
+        for (StreamType b : StreamType.values()) {
+            if (b.type.equalsIgnoreCase(text)) {
+                return b;
+            }
+        }
+
+        return null;
+    }
+
     @Override
     public String toString() {
         return type;

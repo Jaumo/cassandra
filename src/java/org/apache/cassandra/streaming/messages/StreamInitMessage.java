@@ -136,7 +136,7 @@ public class StreamInitMessage
 
             boolean isIncremental = in.readBoolean();
             UUID pendingRepair = in.readBoolean() ? UUIDSerializer.serializer.deserialize(in, version) : null;
-            return new StreamInitMessage(from, sessionIndex, planId, StreamType.valueOf(description), sentByInitiator, keepSSTableLevel, isIncremental, pendingRepair);
+            return new StreamInitMessage(from, sessionIndex, planId, StreamType.fromString(description), sentByInitiator, keepSSTableLevel, isIncremental, pendingRepair);
         }
 
         public long serializedSize(StreamInitMessage message, int version)
