@@ -118,6 +118,47 @@ public class ViewTest extends CQLTester
         Assert.assertEquals(0, execute("select * from view1").size());
     }
 
+    @Test
+    public void testPartitionTombstoneCongruentKey() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k1 int, c1 int , val int, PRIMARY KEY (k1, c1))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        createView("view1", "CREATE MATERIALIZED VIEW view1 AS SELECT k1, val FROM %%s WHERE k1 IS NOT NULL AND c1 IS NOT NULL AND val IS NOT NULL PRIMARY KEY (c1, k1)");
+        Assert.assertTrue(getCurrentColumnFamilyStore().viewManager.primaryKeysOfViewsAreCongruent());
+
+        updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 2, 200)");
+        updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 3, 300)");
+        updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 13, 300)");
+        updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 23, 300)");
+        updateView("INSERT INTO %s (k1, c1, val) VALUES (1, 2, 400)");
+
+        Assert.assertEquals(400, execute("SELECT val FROM %s WHERE k1 = 1 AND c1 = 2").one().getInt("val"));
+        Assert.assertEquals(400, execute("SELECT val FROM view1 WHERE k1 = 1 AND c1 = 2").one().getInt("val"));
+
+        Assert.assertEquals(4, execute("SELECT * from %s").size());
+        Assert.assertEquals(4, execute("SELECT * from view1").size());
+
+        // Row delete
+        updateView("DELETE FROM %s WHERE k1 = 1 AND c1 = 2");
+
+        Assert.assertEquals(3, execute("SELECT * FROM %s").size());
+        Assert.assertEquals(3, execute("SELECT * FROM view1").size());
+
+        // Range delete
+        updateView("DELETE FROM %s WHERE k1 = 1 AND c1 > 10");
+
+        Assert.assertEquals(1, execute("select * from %s").size());
+        Assert.assertEquals(1, execute("select * from view1").size());
+
+        // Partition delete
+        updateView("DELETE FROM %s WHERE k1 = 1");
+
+        Assert.assertEquals(0, execute("select * from %s").size());
+        Assert.assertEquals(0, execute("select * from view1").size());
+    }
 
     @Test
     public void createMvWithUnrestrictedPKParts() throws Throwable

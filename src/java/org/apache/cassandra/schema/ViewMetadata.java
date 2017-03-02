@@ -46,7 +46,7 @@ public final class ViewMetadata
 
     // Tells if view has same primary key fields as base table
     // If this is true, view does not need read before write on updte
-    private Boolean congruentPrimaryKey;
+    private Boolean congruentPrimaryKey = null;
 
     /**
      * @param name              Name of the view
@@ -114,7 +114,7 @@ public final class ViewMetadata
         {
             congruentPrimaryKey = hasCongruentPrimaryKey();
         }
-        return !congruentPrimaryKey;
+        return congruentPrimaryKey;
     }
 
     /**

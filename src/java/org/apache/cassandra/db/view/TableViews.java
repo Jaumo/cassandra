@@ -78,7 +78,7 @@ public class TableViews extends AbstractCollection<View>
     {
         // We should have validated that there is no existing view with this name at this point
         assert !contains(view.name);
-        congruentPrimaryKeys = false;
+        congruentPrimaryKeys = null;
         return views.add(view);
     }
 
@@ -139,6 +139,16 @@ public class TableViews extends AbstractCollection<View>
     }
 
     /**
+     * Read can be avoided if all views have congruent keys with base table
+     * AND the mutation is not a range or partition delete
+     * @param update
+     * @return
+     */
+    private boolean requiresRead(PartitionUpdate update) {
+        return !primaryKeysOfViewsAreCongruent() || !update.deletionInfo().isLive();
+    }
+
+    /**
      * Calculates and pushes updates to the views replicas. The replicas are determined by
      * {@link ViewUtils#getViewNaturalEndpoint(String, Token, Token)}.
      *
@@ -157,18 +167,31 @@ public class TableViews extends AbstractCollection<View>
         // Read modified rows
         int nowInSec = FBUtilities.nowInSeconds();
         long queryStartNanoTime = System.nanoTime();
-        SinglePartitionReadCommand command = readExistingRowsCommand(update, views, nowInSec);
-        if (command == null)
-            return;
 
-        ColumnFamilyStore cfs = Keyspace.openAndGetStore(update.metadata());
-        long start = System.nanoTime();
         Collection<Mutation> mutations;
-        try (ReadExecutionController orderGroup = command.executionController();
-             UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeLocally(orderGroup), command);
-             UnfilteredRowIterator updates = update.unfilteredIterator())
+        long start;
+        if (requiresRead(update))
         {
-            mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false));
+            SinglePartitionReadCommand command = buildReadExistingRowsCommand(update, views, nowInSec);
+            if (command == null)
+                return;
+
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(update.metadata());
+            start = System.nanoTime();
+            try (ReadExecutionController orderGroup = command.executionController();
+                 UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeLocally(orderGroup), command);
+                 UnfilteredRowIterator updates = update.unfilteredIterator())
+            {
+                mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false, true));
+            }
+        }
+        else {
+            start = System.nanoTime();
+            try (UnfilteredRowIterator existings = EmptyIterators.unfilteredRow(update.metadata(), update.partitionKey(), false);
+                 UnfilteredRowIterator updates = update.unfilteredIterator())
+            {
+                mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false, false));
+            }
         }
         Keyspace.openAndGetStore(update.metadata()).metric.viewReadTime.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
 
@@ -195,13 +218,14 @@ public class TableViews extends AbstractCollection<View>
                                                               UnfilteredRowIterator updates,
                                                               UnfilteredRowIterator existings,
                                                               int nowInSec,
-                                                              boolean separateUpdates)
+                                                              boolean separateUpdates,
+                                                              boolean hasReadBeforeWrite)
     {
         assert updates.metadata().id.equals(baseTableMetadata.id);
 
         List<ViewUpdateGenerator> generators = new ArrayList<>(views.size());
         for (View view : views)
-            generators.add(new ViewUpdateGenerator(view, updates.partitionKey(), nowInSec));
+            generators.add(new ViewUpdateGenerator(view, updates.partitionKey(), nowInSec, hasReadBeforeWrite));
 
         DeletionTracker existingsDeletion = new DeletionTracker(existings.partitionLevelDeletion());
         DeletionTracker updatesDeletion = new DeletionTracker(updates.partitionLevelDeletion());
@@ -388,7 +412,7 @@ public class TableViews extends AbstractCollection<View>
      * @param nowInSec the current time in seconds.
      * @return the command to use to read the base table rows required to generate view updates for {@code updates}.
      */
-    private SinglePartitionReadCommand readExistingRowsCommand(PartitionUpdate updates, Collection<View> views, int nowInSec)
+    private SinglePartitionReadCommand buildReadExistingRowsCommand(PartitionUpdate updates, Collection<View> views, int nowInSec)
     {
         Slices.Builder sliceBuilder = null;
         DeletionInfo deletionInfo = updates.deletionInfo();

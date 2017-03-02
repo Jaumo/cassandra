@@ -45,6 +45,7 @@ public class ViewUpdateGenerator
 {
     private final View view;
     private final int nowInSec;
+    private final boolean hasReadBeforeWrite;
 
     private final TableMetadata baseMetadata;
     private final DecoratedKey baseDecoratedKey;
@@ -67,6 +68,7 @@ public class ViewUpdateGenerator
         NONE,            // There was no view entry and none should be added
         NEW_ENTRY,       // There was no entry but there is one post-update
         DELETE_OLD,      // There was an entry but there is nothing after update
+        DELETE_EXISTING, // Update is a delete and no read before write happened
         UPDATE_EXISTING, // There was an entry and the update modifies it
         SWITCH_ENTRY     // There was an entry and there is still one after update,
                          // but they are not the same one.
@@ -81,7 +83,7 @@ public class ViewUpdateGenerator
      * @param nowInSec the current time in seconds. Used to decide if data are live or not
      * and as base reference for new deletions.
      */
-    public ViewUpdateGenerator(View view, DecoratedKey basePartitionKey, int nowInSec)
+    public ViewUpdateGenerator(View view, DecoratedKey basePartitionKey, int nowInSec, boolean hasReadBeforeWrite)
     {
         this.view = view;
         this.nowInSec = nowInSec;
@@ -94,6 +96,7 @@ public class ViewUpdateGenerator
 
         this.currentViewEntryPartitionKey = new ByteBuffer[viewMetadata.partitionKeyColumns().size()];
         this.currentViewEntryBuilder = BTreeRow.sortedBuilder();
+        this.hasReadBeforeWrite = hasReadBeforeWrite;
     }
 
     private static ByteBuffer[] extractKeyComponents(DecoratedKey partitionKey, AbstractType<?> type)
@@ -122,6 +125,10 @@ public class ViewUpdateGenerator
                 return;
             case DELETE_OLD:
                 deleteOldEntry(existingBaseRow);
+                return;
+            case DELETE_EXISTING:
+                // Create entry from row deletion info of mergedBaseRow
+                createEntry(mergedBaseRow);
                 return;
             case UPDATE_EXISTING:
                 updateEntry(existingBaseRow, mergedBaseRow);
@@ -187,6 +194,11 @@ public class ViewUpdateGenerator
             // Note that we allow existingBaseRow to be null and treat it as empty (see MultiViewUpdateBuilder.generateViewsMutations).
             boolean existingHasLiveData = existingBaseRow != null && existingBaseRow.hasLiveData(nowInSec);
             boolean mergedHasLiveData = mergedBaseRow.hasLiveData(nowInSec);
+
+            if (!existingHasLiveData && !mergedHasLiveData && !hasReadBeforeWrite) {
+                return UpdateAction.DELETE_EXISTING;
+            }
+
             return existingHasLiveData
                  ? (mergedHasLiveData ? UpdateAction.UPDATE_EXISTING : UpdateAction.DELETE_OLD)
                  : (mergedHasLiveData ? UpdateAction.NEW_ENTRY : UpdateAction.NONE);
