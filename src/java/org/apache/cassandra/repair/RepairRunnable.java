@@ -50,6 +50,7 @@ import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.streaming.StreamType;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
@@ -132,7 +133,7 @@ public class RepairRunnable extends WrappedRunnable implements ProgressEventNoti
         Iterable<ColumnFamilyStore> validColumnFamilies;
         try
         {
-            validColumnFamilies = storageService.getValidColumnFamilies(false, false, keyspace, columnFamilies);
+            validColumnFamilies = StorageService.getValidColumnFamiliesForStreamType(StreamType.REPAIR, keyspace, columnFamilies);
             progress.incrementAndGet();
         }
         catch (IllegalArgumentException e)

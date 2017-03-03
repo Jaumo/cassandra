@@ -2212,7 +2212,7 @@ public class DatabaseDescriptor
         return conf.cdc_enabled;
     }
 
-    public static boolean isMVFastStreamEnabled()
+    public static Config.MVFastStream getMVFastStream()
     {
         return conf.mv_fast_stream;
     }

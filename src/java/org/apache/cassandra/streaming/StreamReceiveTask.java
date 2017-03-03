@@ -39,6 +39,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.view.TableViews;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
@@ -149,35 +150,6 @@ public class StreamReceiveTask extends StreamTask
             this.task = task;
         }
 
-        /*
-         * We have a special path for views and for CDC.
-         *
-         * For views, since the view requires cleaning up any pre-existing state, we must put all partitions
-         * through the same write path as normal mutations. This also ensures any 2is are also updated.
-         *
-         * For CDC-enabled tables, we want to ensure that the mutations are run through the CommitLog so they
-         * can be archived by the CDC process on discard.
-         */
-        private boolean requiresWritePath(ColumnFamilyStore cfs) {
-            // Don't go through write path if mv_fast_stream is either enabled globally or on CF
-            if (cfs.metadata().params.mvFastStream ||
-                DatabaseDescriptor.isMVFastStreamEnabled() ||
-                !cfs.viewManager.primaryKeysOfViewsAreCongruent())
-            {
-                return false;
-            }
-
-            // Write path is not required for consistent range movements
-            switch (task.session.type()) {
-                case BOOTSTRAP:
-                case DECOMMISSION:
-                    return false;
-            }
-
-            // write path required if table has views
-            return !Iterables.isEmpty(View.findAll(cfs.metadata.keyspace, cfs.getTableName()));
-        }
-
         private boolean hasCDC(ColumnFamilyStore cfs)
         {
             return cfs.metadata().params.cdc;
@@ -244,12 +216,12 @@ public class StreamReceiveTask extends StreamTask
                     return;
                 }
 
-                requiresWritePath = requiresWritePath(cfs);
+                requiresWritePath = TableViews.streamForCFRequiresWritePath(task.session.type(), cfs);
                 Collection<SSTableReader> readers = task.sstables;
 
                 try (Refs<SSTableReader> refs = Refs.ref(readers))
                 {
-                    if (requiresWritePath(cfs))
+                    if (requiresWritePath)
                     {
                         sendThroughWritePatch(cfs, readers);
                     }

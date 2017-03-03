@@ -26,6 +26,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
 
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.filter.*;
@@ -37,6 +39,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.streaming.StreamType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
@@ -78,7 +81,7 @@ public class TableViews extends AbstractCollection<View>
     {
         // We should have validated that there is no existing view with this name at this point
         assert !contains(view.name);
-        congruentPrimaryKeys = false;
+        congruentPrimaryKeys = null;
         return views.add(view);
     }
 
@@ -115,6 +118,15 @@ public class TableViews extends AbstractCollection<View>
             congruentPrimaryKeys = null;
     }
 
+    public View getByName(String viewName)
+    {
+        for (View v : views)
+            if (v.name.equals(viewName))
+                return v;
+
+        return null;
+    }
+
     /**
      * Primary keys of all views are congruent with base tables
      *
@@ -124,12 +136,12 @@ public class TableViews extends AbstractCollection<View>
     {
         if (congruentPrimaryKeys == null)
         {
-            congruentPrimaryKeys = false;
+            congruentPrimaryKeys = true;
             for (View view : views)
             {
-                if (view.getDefinition().primaryKeyIsCongruentToBaseTable())
+                if (!view.getDefinition().primaryKeyIsCongruentToBaseTable())
                 {
-                    congruentPrimaryKeys = true;
+                    congruentPrimaryKeys = false;
                     break;
                 }
             }
@@ -138,13 +150,54 @@ public class TableViews extends AbstractCollection<View>
         return congruentPrimaryKeys;
     }
 
+    /*
+     * For views, since the view requires cleaning up any pre-existing state, we must put all partitions
+     * through the same write path as normal mutations. This also ensures any 2is are also updated.
+     *
+     * This is not required ...
+     * - for consistent range movements
+     * - if primary keys are congruent, so no stale data can be created
+     * - if disabled administratively on table or global level e.g. for append-only workloads
+     */
+    public static boolean streamForCFRequiresWritePath(StreamType type, ColumnFamilyStore cfs)
+    {
+        // Write path is not required for consistent range movements
+        switch (type)
+        {
+            case BOOTSTRAP:
+            case DECOMMISSION:
+                return false;
+        }
+
+        boolean hasViews = !Iterables.isEmpty(View.findAll(cfs.metadata.keyspace, cfs.getTableName()));
+        if (!hasViews) {
+            return false;
+        }
+
+        Config.MVFastStream doFastStream = DatabaseDescriptor.getMVFastStream();
+        // Apply table setting if global setting is 'auto'
+        if (doFastStream == Config.MVFastStream.auto) {
+            doFastStream = cfs.metadata().params.mvFastStream;
+        }
+
+        switch (doFastStream) {
+            case always:
+                return false;
+            case auto:
+                return !cfs.viewManager.primaryKeysOfViewsAreCongruent();
+            case never:
+        }
+
+        return true;
+    }
+
     /**
      * Calculates and pushes updates to the views replicas. The replicas are determined by
      * {@link ViewUtils#getViewNaturalEndpoint(String, Token, Token)}.
      *
-     * @param update an update on the base table represented by this object.
+     * @param update         an update on the base table represented by this object.
      * @param writeCommitLog whether we should write the commit log for the view updates.
-     * @param baseComplete time from epoch in ms that the local base mutation was (or will be) completed
+     * @param baseComplete   time from epoch in ms that the local base mutation was (or will be) completed
      */
     public void pushViewReplicaUpdates(PartitionUpdate update, boolean writeCommitLog, AtomicLong baseComplete)
     {
@@ -181,14 +234,14 @@ public class TableViews extends AbstractCollection<View>
      * Given some updates on the base table of this object and the existing values for the rows affected by that update, generates the
      * mutation to be applied to the provided views.
      *
-     * @param views the views potentially affected by {@code updates}.
-     * @param updates the base table updates being applied.
+     * @param views     the views potentially affected by {@code updates}.
+     * @param updates   the base table updates being applied.
      * @param existings the existing values for the rows affected by {@code updates}. This is used to decide if a view is
-     * obsoleted by the update and should be removed, gather the values for columns that may not be part of the update if
-     * a new view entry needs to be created, and compute the minimal updates to be applied if the view entry isn't changed
-     * but has simply some updated values. This will be empty for view building as we want to assume anything we'll pass
-     * to {@code updates} is new.
-     * @param nowInSec the current time in seconds.
+     *                  obsoleted by the update and should be removed, gather the values for columns that may not be part of the update if
+     *                  a new view entry needs to be created, and compute the minimal updates to be applied if the view entry isn't changed
+     *                  but has simply some updated values. This will be empty for view building as we want to assume anything we'll pass
+     *                  to {@code updates} is new.
+     * @param nowInSec  the current time in seconds.
      * @return the mutations to apply to the {@code views}. This can be empty.
      */
     public Iterator<Collection<Mutation>> generateViewUpdates(Collection<View> views,
@@ -230,7 +283,7 @@ public class TableViews extends AbstractCollection<View>
                     continue;
                 }
 
-                updateRow = ((Row)updatesIter.next()).withRowDeletion(updatesDeletion.currentDeletion());
+                updateRow = ((Row) updatesIter.next()).withRowDeletion(updatesDeletion.currentDeletion());
                 existingRow = emptyRow(updateRow.clustering(), existingsDeletion.currentDeletion());
             }
             else if (cmp > 0)
@@ -243,7 +296,7 @@ public class TableViews extends AbstractCollection<View>
                     continue;
                 }
 
-                existingRow = ((Row)existingsIter.next()).withRowDeletion(existingsDeletion.currentDeletion());
+                existingRow = ((Row) existingsIter.next()).withRowDeletion(existingsDeletion.currentDeletion());
                 updateRow = emptyRow(existingRow.clustering(), updatesDeletion.currentDeletion());
 
                 // The way we build the read command used for existing rows, we should always have updatesDeletion.currentDeletion()
@@ -265,8 +318,8 @@ public class TableViews extends AbstractCollection<View>
                 }
 
                 assert !existing.isRangeTombstoneMarker();
-                existingRow = ((Row)existingsIter.next()).withRowDeletion(existingsDeletion.currentDeletion());
-                updateRow = ((Row)updatesIter.next()).withRowDeletion(updatesDeletion.currentDeletion());
+                existingRow = ((Row) existingsIter.next()).withRowDeletion(existingsDeletion.currentDeletion());
+                updateRow = ((Row) updatesIter.next()).withRowDeletion(updatesDeletion.currentDeletion());
             }
 
             addToViewUpdateGenerators(existingRow, updateRow, generators, nowInSec);
@@ -283,7 +336,7 @@ public class TableViews extends AbstractCollection<View>
                 if (existing.isRangeTombstoneMarker())
                     continue;
 
-                Row existingRow = (Row)existing;
+                Row existingRow = (Row) existing;
                 addToViewUpdateGenerators(existingRow, emptyRow(existingRow.clustering(), updatesDeletion.currentDeletion()), generators, nowInSec);
             }
         }
@@ -383,8 +436,8 @@ public class TableViews extends AbstractCollection<View>
      * Returns the command to use to read the existing rows required to generate view updates for the provided base
      * base updates.
      *
-     * @param updates the base table updates being applied.
-     * @param views the views potentially affected by {@code updates}.
+     * @param updates  the base table updates being applied.
+     * @param views    the views potentially affected by {@code updates}.
      * @param nowInSec the current time in seconds.
      * @return the command to use to read the base table rows required to generate view updates for {@code updates}.
      */
@@ -447,13 +500,13 @@ public class TableViews extends AbstractCollection<View>
             return null;
 
         ClusteringIndexFilter clusteringFilter = names == null
-                                               ? new ClusteringIndexSliceFilter(sliceBuilder.build(), false)
-                                               : new ClusteringIndexNamesFilter(names, false);
+                                                 ? new ClusteringIndexSliceFilter(sliceBuilder.build(), false)
+                                                 : new ClusteringIndexNamesFilter(names, false);
         // If we have more than one view, we should merge the queried columns by each views but to keep it simple we just
         // include everything. We could change that in the future.
         ColumnFilter queriedColumns = views.size() == 1
-                                    ? Iterables.getOnlyElement(views).getSelectStatement().queriedColumns()
-                                    : ColumnFilter.all(metadata);
+                                      ? Iterables.getOnlyElement(views).getSelectStatement().queriedColumns()
+                                      : ColumnFilter.all(metadata);
         // Note that the views could have restrictions on regular columns, but even if that's the case we shouldn't apply those
         // when we read, because even if an existing row doesn't match the view filter, the update can change that in which
         // case we'll need to know the existing content. There is also no easy way to merge those RowFilter when we have multiple views.
@@ -479,9 +532,9 @@ public class TableViews extends AbstractCollection<View>
      * to apply to MVs using the provided {@code ViewUpdateGenerator}s.
      *
      * @param existingBaseRow the base table row as it is before an update.
-     * @param updateBaseRow the newly updates made to {@code existingBaseRow}.
-     * @param generators the view update generators to add the new changes to.
-     * @param nowInSec the current time in seconds. Used to decide if data is live or not.
+     * @param updateBaseRow   the newly updates made to {@code existingBaseRow}.
+     * @param generators      the view update generators to add the new changes to.
+     * @param nowInSec        the current time in seconds. Used to decide if data is live or not.
      */
     private static void addToViewUpdateGenerators(Row existingBaseRow, Row updateBaseRow, Collection<ViewUpdateGenerator> generators, int nowInSec)
     {
@@ -510,7 +563,7 @@ public class TableViews extends AbstractCollection<View>
      * passed to {@link #addBaseTableUpdate}.
      *
      * @param baseTableMetadata the metadata for the base table being updated.
-     * @param generators the generators from which to extract the view mutations from.
+     * @param generators        the generators from which to extract the view mutations from.
      * @return the mutations created by all the generators in {@code generators}.
      */
     private Collection<Mutation> buildMutations(TableMetadata baseTableMetadata, List<ViewUpdateGenerator> generators)
@@ -564,10 +617,10 @@ public class TableViews extends AbstractCollection<View>
         public void update(Unfiltered marker)
         {
             assert marker instanceof RangeTombstoneMarker;
-            RangeTombstoneMarker rtm = (RangeTombstoneMarker)marker;
+            RangeTombstoneMarker rtm = (RangeTombstoneMarker) marker;
             this.deletion = rtm.isOpen(false)
-                          ? rtm.openDeletionTime(false)
-                          : null;
+                            ? rtm.openDeletionTime(false)
+                            : null;
         }
 
         public DeletionTime currentDeletion()

@@ -24,10 +24,7 @@ import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.apache.cassandra.cql3.statements.TableAttributes;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.BloomCalculations;
 
@@ -90,7 +87,7 @@ public final class TableParams
     public final CompressionParams compression;
     public final ImmutableMap<String, ByteBuffer> extensions;
     public final boolean cdc;
-    public final boolean mvFastStream;
+    public final Config.MVFastStream mvFastStream;
 
     private TableParams(Builder builder)
     {
@@ -302,7 +299,7 @@ public final class TableParams
         private CompressionParams compression = CompressionParams.DEFAULT;
         private ImmutableMap<String, ByteBuffer> extensions = ImmutableMap.of();
         private boolean cdc;
-        private boolean mvFastStream;
+        private Config.MVFastStream mvFastStream = Config.MVFastStream.DEFAULT;
 
         public Builder()
         {
@@ -403,7 +400,7 @@ public final class TableParams
             return this;
         }
 
-        public Builder mvFastStream(boolean val)
+        public Builder mvFastStream(Config.MVFastStream val)
         {
             mvFastStream = val;
             return this;

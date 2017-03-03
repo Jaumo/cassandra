@@ -317,7 +317,7 @@ public class ColumnFamilyStoreCQLHelper
         builder.append("\n\tAND compaction = ").append(toCQL(tableParams.compaction.asMap()));
         builder.append("\n\tAND compression = ").append(toCQL(tableParams.compression.asMap()));
         builder.append("\n\tAND cdc = ").append(tableParams.cdc);
-        builder.append("\n\tAND mv_fast_stream = ").append(tableParams.mvFastStream);
+        builder.append("\n\tAND mv_fast_stream = ").append(tableParams.mvFastStream.toString());
 
         builder.append("\n\tAND extensions = { ");
         for (Map.Entry<String, ByteBuffer> entry : tableParams.extensions.entrySet())

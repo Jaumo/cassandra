@@ -479,7 +479,7 @@ A table supports the following options:
 +--------------------------------+----------+-------------+-----------------------------------------------------------+
 | ``caching``                    | *map*    | *see below* | :ref:`Caching options <cql-caching-options>`.             |
 +--------------------------------+----------+-------------+-----------------------------------------------------------+
-| ``mv_fast_stream``             | *simple* | false       | Writes streams for tables with views directly to SSTables |
+| ``mv_fast_stream``             | *simple* | auto        | Writes streams for tables with views directly to SSTables |
 |                                |          |             | instead of going through write path                       |
 +--------------------------------+----------+-------------+-----------------------------------------------------------+
 

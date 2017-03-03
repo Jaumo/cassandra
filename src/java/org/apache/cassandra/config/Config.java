@@ -202,8 +202,8 @@ public class Config
     public int cdc_free_space_check_interval_ms = 250;
 
     // Don't send streams for MVs through write path
-    // This enables it globally. There is also a table option 'mv_fast_stream' to enable this per CF
-    public boolean mv_fast_stream = false;
+    // This sets it globally. There is also a table option 'mv_fast_stream' to set it per CF
+    public MVFastStream mv_fast_stream = MVFastStream.auto;
 
     @Deprecated
     public int commitlog_periodic_queue_size = -1;
@@ -414,6 +414,24 @@ public class Config
     {
         ssd,
         spinning
+    }
+
+    public enum MVFastStream
+    {
+        never,
+        auto,
+        always;
+
+        public static final MVFastStream DEFAULT = never;
+
+        public static MVFastStream fromString(String name)
+        {
+            // Never is default and backwards compatible bevahiour
+            if (name == null || name.isEmpty())
+                return DEFAULT;
+
+            return valueOf(name);
+        }
     }
 
     private static final List<String> SENSITIVE_KEYS = new ArrayList<String>() {{

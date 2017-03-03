@@ -115,7 +115,7 @@ public final class SchemaKeyspace
               + "read_repair_chance double,"
               + "speculative_retry text,"
               + "cdc boolean,"
-              + "mv_fast_stream boolean,"
+              + "mv_fast_stream text,"
               + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final TableMetadata Columns =
@@ -530,7 +530,7 @@ public final class SchemaKeyspace
 
         // Views don't have that flag
         if (!forView)
-           builder.add("mv_fast_stream", params.mvFastStream);
+           builder.add("mv_fast_stream", params.mvFastStream.toString());
 
         // Only add CDC-enabled flag to schema if it's enabled on the node. This is to work around RTE's post-8099 if a 3.8+
         // node sends table schema to a < 3.8 versioned node with an unknown column.
@@ -987,7 +987,7 @@ public final class SchemaKeyspace
                           .crcCheckChance(row.getDouble("crc_check_chance"))
                           .speculativeRetry(SpeculativeRetryParam.fromString(row.getString("speculative_retry")))
                           .cdc(row.has("cdc") && row.getBoolean("cdc"))
-                          .mvFastStream(row.has("mv_fast_stream") && row.getBoolean("mv_fast_stream"))
+                          .mvFastStream(Config.MVFastStream.fromString(row.has("mv_fast_stream") ? row.getString("mv_fast_stream") : null))
                           .build();
     }
 

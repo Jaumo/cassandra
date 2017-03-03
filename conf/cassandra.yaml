@@ -1125,18 +1125,30 @@ back_pressure_strategy:
 # Instead streams are directly written into SSTables. Sending streams through write path is MUCH slower than just
 # writing SSTables as each mutation in the stream causes a read on the base table. See write path documentation for
 # more details. In MOST cases, write path is required to guarantee consistency.
+#
 # However, a read before write is not necessary if one of the following is true:
-# (a) The materialized view does not add fields to the primary key of the base table
-#     and does not perform filtering like (CREATE MATERIALIZED VIEW ... WHERE field_a = 1).
+# (a) The materialized view keys are congruent to the base table. That means it does not add fields to the primary key.
 #     Example: base_table has primary key (a, b) and view has primary key (b, a)
 # (b) Your model is append only. No deletes, no updates, only inserts.
 #
-# There is also a table option to enable mv_fast_stream per table:
-# ALTER TABLE x WITH mv_fast_stream = true
-# Setting this option enables mv_fast_stream globally and ignores per table settings
+# Considerations:
+# - ENABLING fast streaming requires each MV to be repaired separately. This required more effort if
+#   there are only few inconsistencies as each MV requires validation on repair.
+# - DISABLING fast streaming may reduce the load during regular repairs. If data is very inconsistent, e.g. long outage
+#   of a node, regular view repairs can be very slow as each mutation triggers a read-before-write. In this case
+#   fast streaming will be much faster
 #
-# If none of the above is true and you enable mv_fast_stream, this may create stale data in the MV,
-# which can only be recovered by recreating the MV. A repair won't detect these kinds of inconsistencies as the
+# There are 3 possible values
+# - auto: Auto-detects if fast streaming can be enabled
+# - always: Always enables fast streaming
+# - never: Never enables fast streaming
+#
+# Setting mv_fast_stream to always if your model and neither (a) or (b) applies, a stream may create stale data in
+# the MV, which can only be recovered by recreating the MV. A repair won't detect these kinds of inconsistencies as the
 # inconsistency does not exist among nodes but between a base table and it's MV.
 # See CASSANDRA-12888 and CASSANDRA-13066 for details
-mv_fast_stream: false
+#
+# There is also a table option to enable mv_fast_stream per table:
+# CREATE TABLE ... WITH mv_fast_stream = never|auto|always
+# Setting this option to other than auto sets mv_fast_stream globally and ignores per table settings
+mv_fast_stream: auto

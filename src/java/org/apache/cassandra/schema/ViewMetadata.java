@@ -114,7 +114,7 @@ public final class ViewMetadata
         {
             congruentPrimaryKey = hasCongruentPrimaryKey();
         }
-        return !congruentPrimaryKey;
+        return congruentPrimaryKey;
     }
 
     /**

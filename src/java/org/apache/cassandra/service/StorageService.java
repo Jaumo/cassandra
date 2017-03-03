@@ -65,6 +65,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.view.TableViews;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token.TokenFactory;
@@ -3140,7 +3141,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     }
 
-    private Keyspace getValidKeyspace(String keyspaceName) throws IOException
+    private static Keyspace getValidKeyspace(String keyspaceName) throws IOException
     {
         if (!Schema.instance.getKeyspaces().contains(keyspaceName))
         {
@@ -3232,10 +3233,47 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * @param cfNames CFs
      * @throws java.lang.IllegalArgumentException when given CF name does not exist
      */
-    public Iterable<ColumnFamilyStore> getValidColumnFamilies(boolean allowIndexes, boolean autoAddIndexes, String keyspaceName, String... cfNames) throws IOException
+    public static Iterable<ColumnFamilyStore> getValidColumnFamilies(boolean allowIndexes, boolean autoAddIndexes, String keyspaceName, String... cfNames) throws IOException
     {
         Keyspace keyspace = getValidKeyspace(keyspaceName);
         return keyspace.getValidColumnFamilies(allowIndexes, autoAddIndexes, cfNames);
+    }
+
+    /**
+     * A stream session should only add MVs to list of CFs to repair if
+     * - it is named explicitly
+     * - it is meant to be repaired separately because the base table streams are not going through the write path
+     */
+    public static Iterable<ColumnFamilyStore> getValidColumnFamiliesForStreamType(StreamType streamType, String keyspaceName, String... cfNames) throws IOException
+    {
+        Keyspace keyspace = Keyspace.open(keyspaceName);
+
+        HashMap<String, String> explicitlyNamed = new HashMap<>();
+        for(String cfName: cfNames) {
+            explicitlyNamed.put(cfName, cfName);
+        }
+
+        Iterable<ColumnFamilyStore> all = getValidColumnFamilies(false, false, keyspaceName, cfNames);
+        ArrayList<ColumnFamilyStore> list = new ArrayList<>();
+        for (ColumnFamilyStore cfs: all) {
+            // Repair all non-views and views if explicitly named
+            if (!cfs.metadata().isView() || explicitlyNamed.containsKey(cfs.name))
+                list.add(cfs);
+            // Repair views only if base table streams DON'T go through write path
+            else
+            {
+                ViewMetadata view = Schema.instance.getView(keyspaceName, cfs.name);
+                if (view != null)
+                {
+                    ColumnFamilyStore baseTable = keyspace.getColumnFamilyStore(view.baseTableName);
+                    if (!TableViews.streamForCFRequiresWritePath(streamType, baseTable))
+                    {
+                        list.add(cfs);
+                    }
+                }
+            }
+        }
+        return list;
     }
 
     /**

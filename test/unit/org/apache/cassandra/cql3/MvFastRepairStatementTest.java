@@ -23,32 +23,33 @@ import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 public class MvFastRepairStatementTest extends CQLTester
 {
     @Test
-    public void testEnableOnCreate() throws Throwable
+    public void testSetOnCreate() throws Throwable
     {
-        createTable("CREATE TABLE %s (key text, val int, primary key(key)) WITH mv_fast_stream = true;");
-        Assert.assertTrue(currentTableMetadata().params.mvFastStream);
+        createTable("CREATE TABLE %s (key text, val int, primary key(key)) WITH mv_fast_stream = 'auto';");
+        Assert.assertEquals(Config.MVFastStream.auto, currentTableMetadata().params.mvFastStream);
     }
 
     @Test
-    public void testEnableOnAlter() throws Throwable
+    public void testDefaultValueWithAlter() throws Throwable
     {
         createTable("CREATE TABLE %s (key text, val int, primary key(key));");
-        Assert.assertFalse(currentTableMetadata().params.mvFastStream);
-        execute("ALTER TABLE %s WITH mv_fast_stream = true;");
-        Assert.assertTrue(currentTableMetadata().params.mvFastStream);
+        Assert.assertEquals(Config.MVFastStream.never, currentTableMetadata().params.mvFastStream);
+        execute("ALTER TABLE %s WITH mv_fast_stream = 'auto';");
+        Assert.assertEquals(Config.MVFastStream.auto, currentTableMetadata().params.mvFastStream);
     }
 
     @Test
-    public void testDisableOnAlter() throws Throwable
+    public void testSetOnAlter() throws Throwable
     {
-        createTable("CREATE TABLE %s (key text, val int, primary key(key)) WITH mv_fast_stream = true;");
-        Assert.assertTrue(currentTableMetadata().params.mvFastStream);
-        execute("ALTER TABLE %s WITH mv_fast_stream = false;");
-        Assert.assertFalse(currentTableMetadata().params.mvFastStream);
+        createTable("CREATE TABLE %s (key text, val int, primary key(key)) WITH mv_fast_stream = 'always';");
+        Assert.assertEquals(Config.MVFastStream.always, currentTableMetadata().params.mvFastStream);
+        execute("ALTER TABLE %s WITH mv_fast_stream = 'auto';");
+        Assert.assertEquals(Config.MVFastStream.auto, currentTableMetadata().params.mvFastStream);
     }
 }
