@@ -142,7 +142,7 @@ public class TableViews extends AbstractCollection<View>
              UnfilteredRowIterator existings = UnfilteredPartitionIterators.getOnlyElement(command.executeLocally(orderGroup), command);
              UnfilteredRowIterator updates = update.unfilteredIterator())
         {
-            mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, false));
+            mutations = Iterators.getOnlyElement(generateViewUpdates(views, updates, existings, nowInSec, update.getRepairedAt(), false));
         }
         Keyspace.openAndGetStore(update.metadata()).metric.viewReadTime.update(System.nanoTime() - start, TimeUnit.NANOSECONDS);
 
@@ -163,19 +163,21 @@ public class TableViews extends AbstractCollection<View>
      * but has simply some updated values. This will be empty for view building as we want to assume anything we'll pass
      * to {@code updates} is new.
      * @param nowInSec the current time in seconds.
+     * @param repairedAt repair time of the partition update.
      * @return the mutations to apply to the {@code views}. This can be empty.
      */
     public Iterator<Collection<Mutation>> generateViewUpdates(Collection<View> views,
                                                               UnfilteredRowIterator updates,
                                                               UnfilteredRowIterator existings,
                                                               int nowInSec,
+                                                              long repairedAt,
                                                               boolean separateUpdates)
     {
         assert updates.metadata().id.equals(baseTableMetadata.id);
 
         List<ViewUpdateGenerator> generators = new ArrayList<>(views.size());
         for (View view : views)
-            generators.add(new ViewUpdateGenerator(view, updates.partitionKey(), nowInSec));
+            generators.add(new ViewUpdateGenerator(view, updates.partitionKey(), nowInSec, repairedAt));
 
         DeletionTracker existingsDeletion = new DeletionTracker(existings.partitionLevelDeletion());
         DeletionTracker updatesDeletion = new DeletionTracker(updates.partitionLevelDeletion());

@@ -62,6 +62,11 @@ public class PartitionUpdate extends AbstractBTreePartition
 
     private final int createdAtInSec = FBUtilities.nowInSeconds();
 
+    // Repair timestamp if this update belongs to a repair mutation.
+    // Is inherited from mutation when mutation is applied. Reqired to separate repair/non-repair mutations
+    // in memtables and to transfer state on flush
+    private long repairedAt = 0;
+
     // Records whether this update is "built", i.e. if the build() method has been called, which
     // happens when the update is read. Further writing is then rejected though a manual call
     // to allowNewUpdates() allow new writes. We could make that more implicit but only triggers
@@ -236,6 +241,16 @@ public class PartitionUpdate extends AbstractBTreePartition
     protected boolean canHaveShadowedData()
     {
         return canHaveShadowedData;
+    }
+
+    public long getRepairedAt()
+    {
+        return repairedAt;
+    }
+
+    public void setRepairedAt(long repairedAt)
+    {
+        this.repairedAt = repairedAt;
     }
 
     /**

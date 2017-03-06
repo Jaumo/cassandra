@@ -19,10 +19,13 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.util.*;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Functions;
 import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
 import com.google.common.collect.*;
 
 import org.apache.cassandra.db.DecoratedKey;
@@ -98,6 +101,35 @@ public class View
     public Memtable getCurrentMemtable()
     {
         return liveMemtables.get(liveMemtables.size() - 1);
+    }
+
+    public boolean areAllMemtablesClean() {
+        boolean clean = true;
+        for (Memtable memtable: getFlushableMemtables())
+        {
+            clean &= memtable.isClean();
+        }
+
+        return clean;
+    }
+
+    public boolean isAtLeastOneMemtableExpired() {
+        boolean expired = false;
+        for (Memtable memtable: getFlushableMemtables()) {
+            expired |= memtable.isExpired();
+        }
+
+        return expired;
+    }
+
+    public Iterable<Memtable> getFlushableMemtables() {
+        return filter(liveMemtables, new Predicate<Memtable>()
+        {
+            public boolean apply(@Nullable Memtable memtable)
+            {
+                return memtable.isFlushable();
+            }
+        });
     }
 
     /**

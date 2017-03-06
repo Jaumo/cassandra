@@ -597,6 +597,7 @@ public class Keyspace
 
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
+                upd.setRepairedAt(mutation.getRepairedAt());
                 ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
                 if (cfs == null)
                 {

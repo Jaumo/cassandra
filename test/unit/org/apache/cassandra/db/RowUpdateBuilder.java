@@ -24,6 +24,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.*;
 
 /**
@@ -38,6 +39,7 @@ public class RowUpdateBuilder
     private final PartitionUpdate.SimpleBuilder updateBuilder;
     private Row.SimpleBuilder rowBuilder;
     private boolean noRowMarker;
+    private long repairedAt = ActiveRepairService.UNREPAIRED_SSTABLE;
 
     private List<RangeTombstone> rts = new ArrayList<>();
 
@@ -104,7 +106,7 @@ public class RowUpdateBuilder
 
     public Mutation build()
     {
-        return new Mutation(buildUpdate());
+        return new Mutation(buildUpdate(), repairedAt);
     }
 
     public PartitionUpdate buildUpdate()
@@ -187,4 +189,12 @@ public class RowUpdateBuilder
     {
         return delete(columnMetadata.name.toString());
     }
+
+    public RowUpdateBuilder repairedAt(long repairedAt)
+    {
+        this.repairedAt = repairedAt;
+        return this;
+    }
+
+
 }

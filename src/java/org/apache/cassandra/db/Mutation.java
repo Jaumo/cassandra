@@ -56,33 +56,48 @@ public class Mutation implements IMutation
 
     // Time at which this mutation was instantiated
     public final long createdAt = System.currentTimeMillis();
+
+    // Time at which this mutation was repaired, if it is a repair mutation
+    private long repairedAt = 0;
+
     // keep track of when mutation has started waiting for a MV partition lock
     public final AtomicLong viewLockAcquireStart = new AtomicLong(0);
 
     private boolean cdcEnabled = false;
 
+    public Mutation(String keyspaceName, DecoratedKey key, long repairedAt)
+    {
+        this(keyspaceName, key, new HashMap<>(), repairedAt);
+    }
+
     public Mutation(String keyspaceName, DecoratedKey key)
     {
-        this(keyspaceName, key, new HashMap<>());
+        this(keyspaceName, key,0);
     }
 
     public Mutation(PartitionUpdate update)
     {
-        this(update.metadata().keyspace, update.partitionKey(), Collections.singletonMap(update.metadata().id, update));
+        this(update, 0);
     }
 
-    protected Mutation(String keyspaceName, DecoratedKey key, Map<TableId, PartitionUpdate> modifications)
+    public Mutation(PartitionUpdate update, long repairedAt)
+    {
+        this(update.metadata().keyspace, update.partitionKey(), Collections.singletonMap(update.metadata().id, update), repairedAt);
+    }
+
+    protected Mutation(String keyspaceName, DecoratedKey key, Map<TableId, PartitionUpdate> modifications, long repairedAt)
     {
         this.keyspaceName = keyspaceName;
         this.key = key;
         this.modifications = modifications;
+        this.repairedAt = repairedAt;
         for (PartitionUpdate pu : modifications.values())
             cdcEnabled |= pu.metadata().params.cdc;
     }
 
     public Mutation copy()
     {
-        return new Mutation(keyspaceName, key, new HashMap<>(modifications));
+        return new Mutation(keyspaceName, key, new HashMap<>(modifications), repairedAt);
     }
 
     public Mutation without(Set<TableId> tableIds)
@@ -184,8 +199,18 @@ public class Mutation implements IMutation
         Set<TableId> updatedTables = new HashSet<>();
         String ks = null;
         DecoratedKey key = null;
+        long repairedAt = -1;
         for (Mutation mutation : mutations)
         {
+            // Merge repairedAt only if all repairedAt of all mutations are the same
+            if (repairedAt == -1)
+                repairedAt = mutation.repairedAt;
+            else
+            {
+                if (repairedAt != mutation.repairedAt)
+                   repairedAt = 0;
+            }
+
             updatedTables.addAll(mutation.modifications.keySet());
             if (ks != null && !ks.equals(mutation.keyspaceName))
                 throw new IllegalArgumentException();
@@ -212,7 +237,7 @@ public class Mutation implements IMutation
             modifications.put(table, updates.size() == 1 ? updates.get(0) : PartitionUpdate.merge(updates));
             updates.clear();
         }
-        return new Mutation(ks, key, modifications);
+        return new Mutation(ks, key, modifications, repairedAt);
     }
 
     public CompletableFuture<?> applyFuture()
@@ -271,6 +296,11 @@ public class Mutation implements IMutation
     public boolean trackedByCDC()
     {
         return cdcEnabled;
+    }
+
+    public long getRepairedAt()
+    {
+        return repairedAt;
     }
 
     public String toString()
@@ -399,7 +429,7 @@ public class Mutation implements IMutation
                 modifications.put(update.metadata().id, update);
             }
 
-            return new Mutation(update.metadata().keyspace, dk, modifications);
+            return new Mutation(update.metadata().keyspace, dk, modifications, 0);
         }
 
         public Mutation deserialize(DataInputPlus in, int version) throws IOException

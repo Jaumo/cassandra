@@ -31,6 +31,7 @@ import com.google.common.collect.*;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Memtable;
+import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -295,7 +296,7 @@ public class Tracker
     /**
      * get the Memtable that the ordered writeOp should be directed to
      */
-    public Memtable getMemtableFor(OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public Memtable getMemtableFor(OpOrder.Group opGroup, CommitLogPosition commitLogPosition, long repairedAt)
     {
         // since any new memtables appended to the list after we fetch it will be for operations started
         // after us, we can safely assume that we will always find the memtable that 'accepts' us;
@@ -306,9 +307,25 @@ public class Tracker
         // assign operations to a memtable that was retired/queued before we started)
         for (Memtable memtable : view.get().liveMemtables)
         {
-            if (memtable.accepts(opGroup, commitLogPosition))
+            if (memtable.accepts(opGroup, commitLogPosition, repairedAt))
                 return memtable;
         }
+
+        // Append repair memtable on demand as this is just an additional memtable, old memtables need no treatment
+        if (repairedAt > 0)
+        {
+            // Init with requested CLP or current CLP
+            CommitLogPosition lowerPosition = commitLogPosition != null ?
+                                              commitLogPosition :
+                                              CommitLog.instance.getCurrentPosition();
+            AtomicReference<CommitLogPosition> commitLogLowerBound = new AtomicReference<>(lowerPosition);
+            Memtable newMemtable = new Memtable(commitLogLowerBound, cfstore);
+            newMemtable.setRepairedAt(repairedAt);
+            // Appends new memtable and switches view
+            apply(View.switchMemtable(newMemtable));
+            return newMemtable;
+        }
+
         throw new AssertionError(view.get().liveMemtables.toString());
     }
 
@@ -320,15 +337,16 @@ public class Tracker
      *
      * @return the previously active memtable
      */
-    public Memtable switchMemtable(boolean truncating, Memtable newMemtable)
+    public Iterable<Memtable> switchMemtable(boolean truncating, Memtable newMemtable)
     {
         Pair<View, View> result = apply(View.switchMemtable(newMemtable));
         if (truncating)
             notifyRenewed(newMemtable);
         else
-            notifySwitched(result.left.getCurrentMemtable());
+            for (Memtable oldFlushable: result.left.getFlushableMemtables())
+                notifySwitched(oldFlushable);
 
-        return result.left.getCurrentMemtable();
+        return result.left.getFlushableMemtables();
     }
 
     public void markFlushing(Memtable memtable)

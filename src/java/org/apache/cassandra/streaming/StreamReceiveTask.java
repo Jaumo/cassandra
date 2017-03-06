@@ -19,6 +19,7 @@ package org.apache.cassandra.streaming;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Date;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -44,9 +45,11 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.streaming.messages.FileMessageHeader;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.joda.time.DateTime;
 
 /**
  * Task that manages receiving files for the session for certain ColumnFamily.
@@ -181,6 +184,9 @@ public class StreamReceiveTask extends StreamTask
                      */
                     if (hasViews || hasCDC)
                     {
+                        // SSTableReader has no repairedAt timestamp.
+                        // {@code CompactionStrategyManager.createSSTableMultiWriter} returns an unrepaired writer during repairs
+                        long repairedAt = new Date().getTime();
                         for (SSTableReader reader : readers)
                         {
                             Keyspace ks = Keyspace.open(reader.getKeyspaceName());
@@ -190,7 +196,7 @@ public class StreamReceiveTask extends StreamTask
                                 {
                                     try (UnfilteredRowIterator rowIterator = scanner.next())
                                     {
-                                        Mutation m = new Mutation(PartitionUpdate.fromIterator(rowIterator, ColumnFilter.all(cfs.metadata())));
+                                        Mutation m = new Mutation(PartitionUpdate.fromIterator(rowIterator, ColumnFilter.all(cfs.metadata())), repairedAt);
 
                                         // MV *can* be applied unsafe if there's no CDC on the CFS as we flush below
                                         // before transaction is done.

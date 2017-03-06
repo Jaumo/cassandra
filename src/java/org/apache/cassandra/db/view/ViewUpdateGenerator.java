@@ -45,6 +45,7 @@ public class ViewUpdateGenerator
 {
     private final View view;
     private final int nowInSec;
+    private final long repairedAt;
 
     private final TableMetadata baseMetadata;
     private final DecoratedKey baseDecoratedKey;
@@ -81,10 +82,11 @@ public class ViewUpdateGenerator
      * @param nowInSec the current time in seconds. Used to decide if data are live or not
      * and as base reference for new deletions.
      */
-    public ViewUpdateGenerator(View view, DecoratedKey basePartitionKey, int nowInSec)
+    public ViewUpdateGenerator(View view, DecoratedKey basePartitionKey, int nowInSec, long repairedAt)
     {
         this.view = view;
         this.nowInSec = nowInSec;
+        this.repairedAt = repairedAt;
 
         this.baseMetadata = view.getDefinition().baseTableMetadata();
         this.baseDecoratedKey = basePartitionKey;
@@ -527,6 +529,7 @@ public class ViewUpdateGenerator
             // We can't really know which columns of the view will be updated nor how many row will be updated for this key
             // so we rely on hopefully sane defaults.
             update = new PartitionUpdate(viewMetadata, partitionKey, viewMetadata.regularAndStaticColumns(), 4);
+            update.setRepairedAt(repairedAt);
             updates.put(partitionKey, update);
         }
         update.add(row);

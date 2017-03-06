@@ -239,10 +239,10 @@ public class TrackerTest
             Assert.assertEquals(3, listener.received.size());
             Assert.assertEquals(tracker, listener.senders.get(0));
             Assert.assertTrue(listener.received.get(0) instanceof SSTableDeletingNotification);
-            Assert.assertTrue(listener.received.get(1) instanceof  SSTableDeletingNotification);
+            Assert.assertTrue(listener.received.get(1) instanceof SSTableDeletingNotification);
             Assert.assertTrue(listener.received.get(2) instanceof SSTableListChangedNotification);
             Assert.assertEquals(readers.get(1), ((SSTableDeletingNotification) listener.received.get(0)).deleting);
-            Assert.assertEquals(readers.get(2), ((SSTableDeletingNotification)listener.received.get(1)).deleting);
+            Assert.assertEquals(readers.get(2), ((SSTableDeletingNotification) listener.received.get(1)).deleting);
             Assert.assertEquals(2, ((SSTableListChangedNotification) listener.received.get(2)).removed.size());
             Assert.assertEquals(0, ((SSTableListChangedNotification) listener.received.get(2)).added.size());
             Assert.assertEquals(9, cfs.metric.liveDiskSpaceUsed.getCount());
@@ -267,21 +267,21 @@ public class TrackerTest
         Tracker tracker = cfs.getTracker();
         tracker.subscribe(listener);
 
-        Memtable prev1 = tracker.switchMemtable(true, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
+        Memtable prev1 = Iterables.getOnlyElement(tracker.switchMemtable(true, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs)));
         OpOrder.Group write1 = cfs.keyspace.writeOrder.getCurrent();
         OpOrder.Barrier barrier1 = cfs.keyspace.writeOrder.newBarrier();
         prev1.setDiscarding(barrier1, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier1.issue();
-        Memtable prev2 = tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
+        Memtable prev2 = Iterables.getOnlyElement(tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs)));
         OpOrder.Group write2 = cfs.keyspace.writeOrder.getCurrent();
         OpOrder.Barrier barrier2 = cfs.keyspace.writeOrder.newBarrier();
         prev2.setDiscarding(barrier2, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
         barrier2.issue();
         Memtable cur = tracker.getView().getCurrentMemtable();
         OpOrder.Group writecur = cfs.keyspace.writeOrder.getCurrent();
-        Assert.assertEquals(prev1, tracker.getMemtableFor(write1, CommitLogPosition.NONE));
-        Assert.assertEquals(prev2, tracker.getMemtableFor(write2, CommitLogPosition.NONE));
-        Assert.assertEquals(cur, tracker.getMemtableFor(writecur, CommitLogPosition.NONE));
+        Assert.assertEquals(prev1, tracker.getMemtableFor(write1, CommitLogPosition.NONE, 0));
+        Assert.assertEquals(prev2, tracker.getMemtableFor(write2, CommitLogPosition.NONE, 0));
+        Assert.assertEquals(cur, tracker.getMemtableFor(writecur, CommitLogPosition.NONE, 0));
         Assert.assertEquals(2, listener.received.size());
         Assert.assertTrue(listener.received.get(0) instanceof MemtableRenewedNotification);
         Assert.assertTrue(listener.received.get(1) instanceof MemtableSwitchedNotification);
@@ -314,7 +314,7 @@ public class TrackerTest
         tracker = cfs.getTracker();
         listener = new MockListener(false);
         tracker.subscribe(listener);
-        prev1 = tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs));
+        prev1 = Iterables.getOnlyElement(tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs)));
         tracker.markFlushing(prev1);
         reader = MockSchema.sstable(0, 10, true, cfs);
         cfs.invalidate(false);
@@ -329,6 +329,66 @@ public class TrackerTest
         Assert.assertTrue(listener.received.get(3) instanceof SSTableDeletingNotification);
         Assert.assertEquals(1, ((SSTableListChangedNotification) listener.received.get(4)).removed.size());
         DatabaseDescriptor.setIncrementalBackupsEnabled(backups);
+    }
+
+    @Test
+    public void testRepairMemtableReplacement()
+    {
+        boolean backups = DatabaseDescriptor.isIncrementalBackupsEnabled();
+        DatabaseDescriptor.setIncrementalBackupsEnabled(false);
+        ColumnFamilyStore cfs = MockSchema.newCFS();
+        MockListener listener = new MockListener(false);
+        Tracker tracker = cfs.getTracker();
+        tracker.subscribe(listener);
+
+        Memtable prev1 = Iterables.getOnlyElement(tracker.switchMemtable(true, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs)));
+        OpOrder.Group write1 = cfs.keyspace.writeOrder.getCurrent();
+        OpOrder.Barrier barrier1 = cfs.keyspace.writeOrder.newBarrier();
+        prev1.setDiscarding(barrier1, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
+        barrier1.issue();
+        Memtable prev2 = Iterables.getOnlyElement(tracker.switchMemtable(false, new Memtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()), cfs)));
+        OpOrder.Group write2 = cfs.keyspace.writeOrder.getCurrent();
+        OpOrder.Barrier barrier2 = cfs.keyspace.writeOrder.newBarrier();
+        prev2.setDiscarding(barrier2, new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
+        barrier2.issue();
+        Memtable cur = tracker.getView().getCurrentMemtable();
+        OpOrder.Group writecur = cfs.keyspace.writeOrder.getCurrent();
+        Assert.assertEquals(prev1, tracker.getMemtableFor(write1, CommitLogPosition.NONE, 0));
+        Assert.assertEquals(prev2, tracker.getMemtableFor(write2, CommitLogPosition.NONE, 0));
+        Assert.assertEquals(cur, tracker.getMemtableFor(writecur, CommitLogPosition.NONE, 0));
+        Assert.assertEquals(3, tracker.getView().liveMemtables.size());
+
+        // New memtable has been created for repairs
+        Memtable repaired1 = tracker.getMemtableFor(writecur, CommitLogPosition.NONE, 1);
+        // Reuse previously created table
+        Memtable repaired2 = tracker.getMemtableFor(writecur, CommitLogPosition.NONE, 1);
+        Assert.assertSame(repaired2, repaired1);
+        Assert.assertEquals(4, tracker.getView().liveMemtables.size());
+        Assert.assertNotSame(cur, repaired1);
+        Assert.assertNotSame(prev1, repaired1);
+        Assert.assertNotSame(prev2, repaired1);
+
+        Assert.assertEquals(2, listener.received.size());
+        Assert.assertTrue(listener.received.get(0) instanceof MemtableRenewedNotification);
+        Assert.assertTrue(listener.received.get(1) instanceof MemtableSwitchedNotification);
+        listener.received.clear();
+
+        tracker.markFlushing(repaired1);
+        Assert.assertEquals(1, tracker.getView().flushingMemtables.size());
+        Assert.assertTrue(tracker.getView().flushingMemtables.contains(repaired1));
+
+        tracker.markFlushing(prev1);
+        Assert.assertTrue(tracker.getView().flushingMemtables.contains(prev1));
+        Assert.assertEquals(2, tracker.getView().flushingMemtables.size());
+
+        tracker.replaceFlushed(repaired1, Collections.emptyList());
+        Assert.assertEquals(1, tracker.getView().flushingMemtables.size());
+        Assert.assertTrue(tracker.getView().flushingMemtables.contains(prev1));
+
+        tracker.replaceFlushed(prev1, Collections.emptyList());
+        Assert.assertEquals(0, tracker.getView().flushingMemtables.size());
+
+        Assert.assertEquals(2, tracker.getView().liveMemtables.size());
     }
 
     @Test
@@ -368,5 +428,4 @@ public class TrackerTest
         Assert.assertEquals(singleton(r2), ((SSTableListChangedNotification) listener.received.get(0)).added);
         listener.received.clear();
     }
-
 }

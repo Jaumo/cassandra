@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Assume;
 import org.junit.BeforeClass;
@@ -424,6 +425,34 @@ public class ColumnFamilyStoreTest
             }
         }
         assertEquals(count, found);
+    }
+
+    @Test
+    public void testRepairMutations() throws Throwable
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
+
+        new RowUpdateBuilder(cfs.metadata(), 1, "key").clustering("name").add("val", "1")
+                                                      .repairedAt(1)
+                                                      .build().applyUnsafe();
+        new RowUpdateBuilder(cfs.metadata(), 2, "key").clustering("name").add("val", "2")
+                                                      .build().applyUnsafe();
+        Assert.assertEquals(2, cfs.getTracker().getView().liveMemtables.size());
+        cfs.forceBlockingFlush();
+
+        // Nuke the metadata and reload that sstable
+        Collection<SSTableReader> ssTables = cfs.getLiveSSTables();
+        assertEquals(2, ssTables.size());
+
+        // Exactly one SSTable has to be marked as repaired
+        int countRepaired = 0;
+        for (SSTableReader ssTable: ssTables) {
+            if (ssTable.isRepaired()) {
+                countRepaired++;
+            }
+        }
+        Assert.assertEquals(1, countRepaired);
+        Assert.assertEquals(1, cfs.getTracker().getView().liveMemtables.size());
     }
 
     @Test

@@ -80,6 +80,7 @@ import org.apache.cassandra.utils.TopKSampler.SamplerResult;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
+import org.hyperic.sigar.Mem;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
@@ -280,8 +281,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         // If the CF comparator has changed, we need to change the memtable,
         // because the old one still aliases the previous comparator.
-        if (data.getView().getCurrentMemtable().initialComparator != metadata().comparator)
-            switchMemtable();
+        for (Memtable memtable: data.getView().getFlushableMemtables()) {
+            if (memtable.initialComparator != metadata().comparator)
+            {
+                switchMemtable();
+                break;
+            }
+        }
     }
 
     void scheduleFlush()
@@ -296,11 +302,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 {
                     synchronized (data)
                     {
-                        Memtable current = data.getView().getCurrentMemtable();
                         // if we're not expired, we've been hit by a scheduled flush for an already flushed memtable, so ignore
-                        if (current.isExpired())
+                        if (data.getView().isAtLeastOneMemtableExpired())
                         {
-                            if (current.isClean())
+                            if (data.getView().areAllMemtablesClean())
                             {
                                 // if we're still clean, instead of swapping just reschedule a flush for later
                                 scheduleFlush();
@@ -870,18 +875,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                               format);
     }
 
-    /**
-     * Switches the memtable iff the live memtable is the one provided
-     *
-     * @param memtable
-     */
-    public ListenableFuture<CommitLogPosition> switchMemtableIfCurrent(Memtable memtable)
+    public ListenableFuture<CommitLogPosition> flushMemtablesIfFlushable()
     {
         synchronized (data)
         {
-            if (data.getView().getCurrentMemtable() == memtable)
-                return switchMemtable();
+            for (Memtable flushable: data.getView().getFlushableMemtables())
+                if (flushable.isFlushable())
+                    return switchMemtable();
+
         }
+
         return waitForFlushes();
     }
 
@@ -910,19 +913,22 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         // reclaiming includes that which we are GC-ing;
         float onHeapRatio = 0, offHeapRatio = 0;
         long onHeapTotal = 0, offHeapTotal = 0;
-        Memtable memtable = getTracker().getView().getCurrentMemtable();
-        onHeapRatio +=  memtable.getAllocator().onHeap().ownershipRatio();
-        offHeapRatio += memtable.getAllocator().offHeap().ownershipRatio();
-        onHeapTotal += memtable.getAllocator().onHeap().owns();
-        offHeapTotal += memtable.getAllocator().offHeap().owns();
+
+        for (Memtable memtable: data.getView().getFlushableMemtables()) {
+            onHeapRatio +=  memtable.getAllocator().onHeap().ownershipRatio();
+            offHeapRatio += memtable.getAllocator().offHeap().ownershipRatio();
+            onHeapTotal += memtable.getAllocator().onHeap().owns();
+            offHeapTotal += memtable.getAllocator().offHeap().owns();
+        }
 
         for (ColumnFamilyStore indexCfs : indexManager.getAllIndexColumnFamilyStores())
         {
-            MemtableAllocator allocator = indexCfs.getTracker().getView().getCurrentMemtable().getAllocator();
-            onHeapRatio += allocator.onHeap().ownershipRatio();
-            offHeapRatio += allocator.offHeap().ownershipRatio();
-            onHeapTotal += allocator.onHeap().owns();
-            offHeapTotal += allocator.offHeap().owns();
+            for (Memtable memtable: indexCfs.data.getView().getFlushableMemtables()) {
+                onHeapRatio +=  memtable.getAllocator().onHeap().ownershipRatio();
+                offHeapRatio += memtable.getAllocator().offHeap().ownershipRatio();
+                onHeapTotal += memtable.getAllocator().onHeap().owns();
+                offHeapTotal += memtable.getAllocator().offHeap().owns();
+            }
         }
 
         logger.debug("Enqueuing flush of {}: {}",
@@ -945,12 +951,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         synchronized (data)
         {
-            Memtable current = data.getView().getCurrentMemtable();
             for (ColumnFamilyStore cfs : concatWithIndexes())
-                if (!cfs.data.getView().getCurrentMemtable().isClean())
-                    return switchMemtableIfCurrent(current);
-            return waitForFlushes();
+            {
+                if (!cfs.data.getView().areAllMemtablesClean())
+                    return flushMemtablesIfFlushable();
+            }
         }
+
+        return waitForFlushes();
     }
 
     /**
@@ -964,9 +972,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         // we don't loop through the remaining memtables since here we only care about commit log dirtiness
         // and this does not vary between a table and its table-backed indexes
-        Memtable current = data.getView().getCurrentMemtable();
-        if (current.mayContainDataBefore(flushIfDirtyBefore))
-            return switchMemtableIfCurrent(current);
+        for (Memtable flushable: data.getView().getFlushableMemtables()) {
+            if (flushable.mayContainDataBefore(flushIfDirtyBefore))
+                return flushMemtablesIfFlushable();
+        }
+
         return waitForFlushes();
     }
 
@@ -978,10 +988,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         // we grab the current memtable; once any preceding memtables have flushed, we know its
         // commitLogLowerBound has been set (as this it is set with the upper bound of the preceding memtable)
-        final Memtable current = data.getView().getCurrentMemtable();
+        final Iterable<Memtable> flushables = data.getView().getFlushableMemtables();
         ListenableFutureTask<CommitLogPosition> task = ListenableFutureTask.create(() -> {
             logger.debug("forceFlush requested but everything is clean in {}", name);
-            return current.getCommitLogLowerBound();
+            CommitLogPosition highest = null;
+            for (Memtable memtable: flushables)
+            {
+                if (highest == null || highest.compareTo(memtable.getCommitLogLowerBound()) <= 0)
+                    highest = memtable.getCommitLogLowerBound();
+            }
+            return highest;
         });
         postFlushExecutor.execute(task);
         return task;
@@ -1079,9 +1095,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 // so that we can reach a coordinated decision about cleanliness once they
                 // are no longer possible to be modified
                 Memtable newMemtable = new Memtable(commitLogUpperBound, cfs);
-                Memtable oldMemtable = cfs.data.switchMemtable(truncate, newMemtable);
-                oldMemtable.setDiscarding(writeBarrier, commitLogUpperBound);
-                memtables.add(oldMemtable);
+                Iterable<Memtable> oldMemtables = cfs.data.switchMemtable(truncate, newMemtable);
+                for (Memtable oldMemtable: oldMemtables) {
+                    oldMemtable.setDiscarding(writeBarrier, commitLogUpperBound);
+                    memtables.add(oldMemtable);
+                }
             }
 
             // we then ensure an atomic decision is made about the upper bound of the continuous range of commit log
@@ -1281,33 +1299,36 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 // we take a reference to the current main memtable for the CF prior to snapping its ownership ratios
                 // to ensure we have some ordering guarantee for performing the switchMemtableIf(), i.e. we will only
                 // swap if the memtables we are measuring here haven't already been swapped by the time we try to swap them
-                Memtable current = cfs.getTracker().getView().getCurrentMemtable();
+                for (Memtable current: cfs.getTracker().getView().getFlushableMemtables()) {
 
-                // find the total ownership ratio for the memtable and all SecondaryIndexes owned by this CF,
-                // both on- and off-heap, and select the largest of the two ratios to weight this CF
-                float onHeap = 0f, offHeap = 0f;
-                onHeap += current.getAllocator().onHeap().ownershipRatio();
-                offHeap += current.getAllocator().offHeap().ownershipRatio();
+                    // find the total ownership ratio for the memtable and all SecondaryIndexes owned by this CF,
+                    // both on- and off-heap, and select the largest of the two ratios to weight this CF
+                    float onHeap = 0f, offHeap = 0f;
+                    onHeap += current.getAllocator().onHeap().ownershipRatio();
+                    offHeap += current.getAllocator().offHeap().ownershipRatio();
 
-                for (ColumnFamilyStore indexCfs : cfs.indexManager.getAllIndexColumnFamilyStores())
-                {
-                    MemtableAllocator allocator = indexCfs.getTracker().getView().getCurrentMemtable().getAllocator();
-                    onHeap += allocator.onHeap().ownershipRatio();
-                    offHeap += allocator.offHeap().ownershipRatio();
-                }
+                    for (ColumnFamilyStore indexCfs : cfs.indexManager.getAllIndexColumnFamilyStores())
+                    {
+                        for (Memtable idxTable: indexCfs.getTracker().getView().getFlushableMemtables())
+                        {
+                            MemtableAllocator allocator = idxTable.getAllocator();
+                            onHeap += allocator.onHeap().ownershipRatio();
+                            offHeap += allocator.offHeap().ownershipRatio();
+                        }
+                    }
 
-                float ratio = Math.max(onHeap, offHeap);
-                if (ratio > largestRatio)
-                {
-                    largest = current;
-                    largestRatio = ratio;
-                }
+                    float ratio = Math.max(onHeap, offHeap);
+                    if (ratio > largestRatio)
+                    {
+                        largest = current;
+                        largestRatio = ratio;
+                    }
 
-                liveOnHeap += onHeap;
-                liveOffHeap += offHeap;
+                    liveOnHeap += onHeap;
+                    liveOffHeap += offHeap;                }
             }
 
-            if (largest != null)
+            if (largest != null && largest.cfs != null)
             {
                 float usedOnHeap = Memtable.MEMORY_POOL.onHeap.usedRatio();
                 float usedOffHeap = Memtable.MEMORY_POOL.offHeap.usedRatio();
@@ -1318,7 +1339,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 logger.debug("Flushing largest {} to free up room. Used total: {}, live: {}, flushing: {}, this: {}",
                             largest.cfs, ratio(usedOnHeap, usedOffHeap), ratio(liveOnHeap, liveOffHeap),
                             ratio(flushingOnHeap, flushingOffHeap), ratio(thisOnHeap, thisOffHeap));
-                largest.cfs.switchMemtableIfCurrent(largest);
+                largest.cfs.flushMemtablesIfFlushable();
             }
         }
     }
@@ -1341,7 +1362,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         long start = System.nanoTime();
         try
         {
-            Memtable mt = data.getMemtableFor(opGroup, commitLogPosition);
+            Memtable mt = data.getMemtableFor(opGroup, commitLogPosition, update.getRepairedAt());
             long timeDelta = mt.put(update, indexer, opGroup);
             DecoratedKey key = update.partitionKey();
             invalidateCachedPartition(key);

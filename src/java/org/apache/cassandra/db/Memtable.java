@@ -107,6 +107,8 @@ public class Memtable implements Comparable<Memtable>
     // has been finalised, and this is enforced in the ColumnFamilyStore.setCommitLogUpperBound
     private final CommitLogPosition approximateCommitLogLowerBound = CommitLog.instance.getCurrentPosition();
 
+    private long repairedAt = ActiveRepairService.UNREPAIRED_SSTABLE;
+
     public int compareTo(Memtable that)
     {
         return this.approximateCommitLogLowerBound.compareTo(that.approximateCommitLogLowerBound);
@@ -174,13 +176,25 @@ public class Memtable implements Comparable<Memtable>
         return currentOperations.get();
     }
 
+    public long getRepairedAt()
+    {
+        return repairedAt;
+    }
+
+    public void setRepairedAt(long repairedAt)
+    {
+        this.repairedAt = repairedAt;
+    }
+
     @VisibleForTesting
     public void setDiscarding(OpOrder.Barrier writeBarrier, AtomicReference<CommitLogPosition> commitLogUpperBound)
     {
         assert this.writeBarrier == null;
         this.commitLogUpperBound = commitLogUpperBound;
         this.writeBarrier = writeBarrier;
-        allocator.setDiscarding();
+        if (allocator != null) {
+            allocator.setDiscarding();
+        }
     }
 
     void setDiscarded()
@@ -189,8 +203,11 @@ public class Memtable implements Comparable<Memtable>
     }
 
     // decide if this memtable should take the write, or if it should go to the next memtable
-    public boolean accepts(OpOrder.Group opGroup, CommitLogPosition commitLogPosition)
+    public boolean accepts(OpOrder.Group opGroup, CommitLogPosition commitLogPosition, long repairedAt)
     {
+        // Match non-repair mutations to non-repair memtables and repair-mutations to repair-memtables
+        if (!(repairedAt == this.repairedAt || repairedAt > 0 && this.repairedAt > 0))
+            return false;
         // if the barrier hasn't been set yet, then this memtable is still taking ALL writes
         OpOrder.Barrier barrier = this.writeBarrier;
         if (barrier == null)
@@ -236,6 +253,11 @@ public class Memtable implements Comparable<Memtable>
     public boolean isClean()
     {
         return partitions.isEmpty();
+    }
+
+    public boolean isFlushable()
+    {
+        return writeBarrier == null;
     }
 
     public boolean mayContainDataBefore(CommitLogPosition position)
@@ -507,7 +529,7 @@ public class Memtable implements Comparable<Memtable>
 
             return cfs.createSSTableMultiWriter(descriptor,
                                                 toFlush.size(),
-                                                ActiveRepairService.UNREPAIRED_SSTABLE,
+                                                repairedAt,
                                                 ActiveRepairService.NO_PENDING_REPAIR,
                                                 sstableMetadataCollector,
                                                 new SerializationHeader(true, cfs.metadata(), columns, stats), txn);
