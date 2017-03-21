@@ -59,7 +59,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
-import org.apache.cassandra.streaming.StreamType;
+import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
 
@@ -1197,7 +1197,7 @@ public final class SystemKeyspace
         availableRanges.truncateBlocking();
     }
 
-    public static synchronized void updateTransferredRanges(StreamType type,
+    public static synchronized void updateTransferredRanges(StreamOperation streamOperation,
                                                          InetAddress peer,
                                                          String keyspace,
                                                          Collection<Range<Token>> streamedRanges)
@@ -1208,7 +1208,7 @@ public final class SystemKeyspace
         {
             rangesToUpdate.add(rangeToBytes(range));
         }
-        executeInternal(format(cql, TRANSFERRED_RANGES), rangesToUpdate, type.toString(), peer, keyspace);
+        executeInternal(format(cql, TRANSFERRED_RANGES), rangesToUpdate, streamOperation.toString(), peer, keyspace);
     }
 
     public static synchronized Map<InetAddress, Set<Range<Token>>> getTransferredRanges(String description, String keyspace, IPartitioner partitioner)

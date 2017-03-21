@@ -28,7 +28,7 @@ import com.google.common.collect.Sets;
 
 import org.apache.cassandra.streaming.SessionInfo;
 import org.apache.cassandra.streaming.StreamState;
-import org.apache.cassandra.streaming.StreamType;
+import org.apache.cassandra.streaming.StreamOperation;
 
 /**
  */
@@ -74,7 +74,7 @@ public class StreamStateCompositeData
     {
         Map<String, Object> valueMap = new HashMap<>();
         valueMap.put(ITEM_NAMES[0], streamState.planId.toString());
-        valueMap.put(ITEM_NAMES[1], streamState.type.toString());
+        valueMap.put(ITEM_NAMES[1], streamState.streamOperation.getDescription());
 
         CompositeData[] sessions = new CompositeData[streamState.sessions.size()];
         Lists.newArrayList(Iterables.transform(streamState.sessions, new Function<SessionInfo, CompositeData>()
@@ -131,6 +131,6 @@ public class StreamStateCompositeData
                                                                                 return SessionInfoCompositeData.fromCompositeData(input);
                                                                             }
                                                                         }));
-        return new StreamState(planId, StreamType.fromString(typeString), sessions);
+        return new StreamState(planId, StreamOperation.fromString(typeString), sessions);
     }
 }

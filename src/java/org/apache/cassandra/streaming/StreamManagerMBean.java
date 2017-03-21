@@ -23,7 +23,7 @@ import javax.management.openmbean.CompositeData;
 
 public interface StreamManagerMBean extends NotificationEmitter
 {
-    public static final String OBJECT_NAME = "org.apache.cassandra.net:type=StreamManager";
+    public static final String OBJECT_NAME = "org.apache.cassandra.net:streamOperation=StreamManager";
 
     /**
      * Returns the current state of all ongoing streams.

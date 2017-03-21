@@ -158,11 +158,9 @@ public class StreamReceiveTask extends StreamTask
          * can be archived by the CDC process on discard.
          */
         private boolean requiresWritePath(ColumnFamilyStore cfs) {
-            // Write path is not required for consistent range movements
-            switch (task.session.type()) {
-                case BOOTSTRAP:
-                case DECOMMISSION:
-                    return false;
+            // Write path is only required for repairs
+            if (task.session.streamOperation() != StreamOperation.REPAIR) {
+                return false;
             }
 
             // write path required if table has views
@@ -196,7 +194,7 @@ public class StreamReceiveTask extends StreamTask
             return new Mutation(PartitionUpdate.fromIterator(rowIterator, ColumnFilter.all(cfs.metadata())));
         }
 
-        private void sendThroughWritePatch(ColumnFamilyStore cfs, Collection<SSTableReader> readers) {
+        private void sendThroughWritePath(ColumnFamilyStore cfs, Collection<SSTableReader> readers) {
             boolean hasCdc = hasCDC(cfs);
             for (SSTableReader reader : readers)
             {
@@ -242,7 +240,7 @@ public class StreamReceiveTask extends StreamTask
                 {
                     if (requiresWritePath(cfs))
                     {
-                        sendThroughWritePatch(cfs, readers);
+                        sendThroughWritePath(cfs, readers);
                     }
                     else
                     {

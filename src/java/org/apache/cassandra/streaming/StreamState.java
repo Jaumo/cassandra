@@ -30,14 +30,14 @@ import com.google.common.collect.Iterables;
 public class StreamState implements Serializable
 {
     public final UUID planId;
-    public final StreamType type;
+    public final StreamOperation streamOperation;
     public final Set<SessionInfo> sessions;
 
-    public StreamState(UUID planId, StreamType type, Set<SessionInfo> sessions)
+    public StreamState(UUID planId, StreamOperation streamOperation, Set<SessionInfo> sessions)
     {
         this.planId = planId;
         this.sessions = sessions;
-        this.type = type;
+        this.streamOperation = streamOperation;
     }
 
     public boolean hasFailedSession()
