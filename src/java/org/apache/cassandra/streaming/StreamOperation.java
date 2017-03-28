@@ -4,7 +4,6 @@ public enum StreamOperation
 {
 
     OTHER("Other"), // Fallback to avoid null types when deserializing from string
-    UNIT_TEST("UnitTest"), // Reserved for unit tests
     RESTORE_REPLICA_COUNT("Restore replica count"), // Handles removeNode
     DECOMMISSION("Unbootstrap"),
     RELOCATION("Relocation"),

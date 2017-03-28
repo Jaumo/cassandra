@@ -313,7 +313,7 @@ public interface StorageServiceMBean extends NotificationEmitter
      * Invoke repair asynchronously.
      * You can track repair progress by subscribing JMX notification sent from this StorageServiceMBean.
      * Notification format is:
-     *   streamOperation: "repair"
+     *   type: "repair"
      *   userObject: int array of length 2, [0]=command number, [1]=ordinal of ActiveRepairService.Status
      *
      * @param keyspace Keyspace name to repair. Should not be null.
@@ -332,7 +332,7 @@ public interface StorageServiceMBean extends NotificationEmitter
      * Invoke repair asynchronously.
      * You can track repair progress by subscribing JMX notification sent from this StorageServiceMBean.
      * Notification format is:
-     *   streamOperation: "repair"
+     *   type: "repair"
      *   userObject: int array of length 2, [0]=command number, [1]=ordinal of ActiveRepairService.Status
      *
      * @deprecated use {@link #repairAsync(String keyspace, Map options)} instead.

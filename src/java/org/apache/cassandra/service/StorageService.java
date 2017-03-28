@@ -253,7 +253,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
         try
         {
-            jmxObjectName = new ObjectName("org.apache.cassandra.db:streamOperation=StorageService");
+            jmxObjectName = new ObjectName("org.apache.cassandra.db:type=StorageService");
             mbs.registerMBean(this, jmxObjectName);
             mbs.registerMBean(StreamManager.instance, new ObjectName(StreamManager.OBJECT_NAME));
         }

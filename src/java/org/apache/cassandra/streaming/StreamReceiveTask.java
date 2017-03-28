@@ -163,6 +163,12 @@ public class StreamReceiveTask extends StreamTask
                 return false;
             }
 
+            // If the CFS has CDC, these updates need to be written to the CommitLog
+            // so they get archived into the cdc_raw folder
+            if (hasCDC(cfs)) {
+                return true;
+            }
+
             // write path required if table has views
             return !Iterables.isEmpty(View.findAll(cfs.metadata.keyspace, cfs.getTableName()));
         }
@@ -170,23 +176,6 @@ public class StreamReceiveTask extends StreamTask
         private boolean hasCDC(ColumnFamilyStore cfs)
         {
             return cfs.metadata().params.cdc;
-        }
-
-        private void appendToCommitlog(ColumnFamilyStore cfs, Collection<SSTableReader> readers)
-        {
-            for (SSTableReader reader : readers)
-            {
-                try (ISSTableScanner scanner = reader.getScanner())
-                {
-                    while (scanner.hasNext())
-                    {
-                        try (UnfilteredRowIterator rowIterator = scanner.next())
-                        {
-                            CommitLog.instance.add(createMutation(cfs, rowIterator));
-                        }
-                    }
-                }
-            }
         }
 
         Mutation createMutation(ColumnFamilyStore cfs, UnfilteredRowIterator rowIterator)
@@ -238,7 +227,7 @@ public class StreamReceiveTask extends StreamTask
 
                 try (Refs<SSTableReader> refs = Refs.ref(readers))
                 {
-                    if (requiresWritePath(cfs))
+                    if (requiresWritePath)
                     {
                         sendThroughWritePath(cfs, readers);
                     }
@@ -249,13 +238,6 @@ public class StreamReceiveTask extends StreamTask
                         // add sstables and build secondary indexes
                         cfs.addSSTables(readers);
                         cfs.indexManager.buildAllIndexesBlocking(readers);
-
-                        // If the CFS has CDC, these updates need to be written to the CommitLog
-                        // so they get archived into the cdc_raw folder
-                        if (hasCDC(cfs))
-                        {
-                            appendToCommitlog(cfs, readers);
-                        }
 
                         //invalidate row and counter cache
                         if (cfs.isRowCacheEnabled() || cfs.metadata().isCounter())

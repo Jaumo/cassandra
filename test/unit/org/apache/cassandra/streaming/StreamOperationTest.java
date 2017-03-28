@@ -29,7 +29,6 @@ public class StreamOperationTest
         // Unknown descriptions fall back to OTHER
         assertEquals(StreamOperation.OTHER, StreamOperation.fromString("Foobar"));
         assertEquals(StreamOperation.OTHER, StreamOperation.fromString("Other"));
-        assertEquals(StreamOperation.UNIT_TEST, StreamOperation.fromString("UnitTest"));
         assertEquals(StreamOperation.RESTORE_REPLICA_COUNT, StreamOperation.fromString("Restore replica count"));
         assertEquals(StreamOperation.DECOMMISSION, StreamOperation.fromString("Unbootstrap"));
         assertEquals(StreamOperation.RELOCATION, StreamOperation.fromString("Relocation"));
