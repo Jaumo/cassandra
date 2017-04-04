@@ -158,15 +158,15 @@ public class StreamReceiveTask extends StreamTask
          * can be archived by the CDC process on discard.
          */
         private boolean requiresWritePath(ColumnFamilyStore cfs) {
-            // Write path is only required for repairs
-            if (task.session.streamOperation() != StreamOperation.REPAIR) {
-                return false;
-            }
-
             // If the CFS has CDC, these updates need to be written to the CommitLog
             // so they get archived into the cdc_raw folder
             if (hasCDC(cfs)) {
                 return true;
+            }
+
+            // Write path is only required for repairs
+            if (task.session.streamOperation() != StreamOperation.REPAIR) {
+                return false;
             }
 
             // write path required if table has views
